@@ -1,0 +1,3 @@
+variant,long_thr,def_thr,recalibrated,note
+y_60_wf365,0.45,0.8,2026-04-18,v14 wider taper. Promoted from (0.55 0.70) to (0.45 0.80) per experiment_taper_sweep.md. Full Sharpe 1.20 -> 1.24; hold-out 1.19 -> 1.29; full MaxDD -38% -> -32%. Yearly trade: cost in bull years (2024 -9pp return) offset by bear protection (2022 +6.7pp return +5.8pp MaxDD). 58% of rolling 1-yr windows favor wide. Monotone better MaxDD across all 6 yearly splits.
+y_60_sf730,0.55,0.65,2026-04-15,Reference variant. Compromise pick (Option C): wins 3/4 hold-out years vs default with 0.10 gap to avoid binary-trigger overfit. sf730 grid surface lacks a robust zone — see refit_report_v8.

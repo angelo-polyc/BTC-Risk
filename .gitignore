@@ -1,0 +1,22 @@
+# Operational secrets and runtime state
+.env.ops
+logs/
+
+# Drift monitor snapshots — regenerated every daily run
+health_check.csv
+shadow_state.csv
+
+# Pipeline working directories (regenerated from raw pulls)
+data/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS / editor junk
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~

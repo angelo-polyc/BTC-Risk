@@ -1,0 +1,9 @@
+# Additional dependencies for the operational layer (scheduler, API, MCP).
+# The model pipeline has its own requirements in run_all.sh; this file is
+# strictly additive.
+apscheduler>=3.10
+pyyaml>=6.0
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.0
+mcp[cli]>=1.0

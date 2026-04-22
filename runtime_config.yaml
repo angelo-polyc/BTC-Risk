@@ -1,0 +1,57 @@
+# Runtime config for daily_pipeline.py.
+#
+# Operational knobs only. Nothing here affects model behavior — the pipeline
+# code it invokes (run_all.sh, health_check.py, shadow_tracker.py) is the
+# source of truth for model parameters.
+
+# Absolute path to the project checkout where run_all.sh lives.
+# On the Replit Reserved VM this is typically /home/runner/btc_model.
+project_dir: .
+
+# Cron expression (5-field: m h dom mon dow) + IANA timezone.
+# Default: 22:00 UTC daily — after CME Friday close (settlement 21:00 UTC)
+# and far enough past daily Coinglass / Velo aggregation that endpoints are
+# stable. Change to match your venue preferences.
+cron: "0 22 * * *"
+timezone: UTC
+
+# Rotating log settings. One file per day, retained this many days.
+log_dir: logs
+log_filename: pipeline.log
+log_retention_days: 14
+
+# If true, runs the sequence once immediately on startup (in addition to
+# every scheduled tick). Useful on a fresh deploy so the API has data
+# before the first cron fire.
+run_on_startup: false
+
+# The daily sequence, in order. Each step runs as a subprocess in
+# project_dir. Non-zero exit from any step aborts the chain; the next
+# scheduled run still fires at the next tick.
+#
+# Timeouts are generous defaults based on observed wall-clock:
+#   * run_all.sh: ~90s warm, up to ~25min cold (Velo pull dominates).
+#     Cold pulls should be rare; the 1800s (30min) budget is a hard cap.
+#   * health_check.py: ~10s on 4,200-row CSVs; 300s is defensive.
+#   * shadow_tracker.py: similar.
+steps:
+  - name: run_all
+    cmd: ["bash", "run_all.sh"]
+    timeout_sec: 1800
+  - name: health_check
+    cmd: ["python3", "health_check.py", "--out", "health_check.csv"]
+    timeout_sec: 300
+  - name: shadow_tracker
+    cmd: ["python3", "shadow_tracker.py", "--out", "shadow_state.csv"]
+    timeout_sec: 300
+  # audit_log MUST run last — it reads the regenerated master_daily_view and
+  # commits today's row to paper_trading_log.csv. Starts empty on deploy;
+  # no backfill. See OPERATIONS.md § Phase 2 for git setup.
+  #
+  # To push to a remote on every run, replace cmd with one of:
+  #   ["python3", "audit_log.py", "--push-best-effort"]   # push failures don't abort
+  #   ["python3", "audit_log.py", "--push"]               # push failures mark sequence FAILED
+  # Defaults below = local-only commits; push is a separate concern.
+  - name: audit_log
+    cmd: ["python3", "audit_log.py"]
+    timeout_sec: 60

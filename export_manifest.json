@@ -1,0 +1,127 @@
+{
+  "generated_at": "2026-04-18T06:09:53.661426+00:00",
+  "hypothesis_entries": [
+    {
+      "group": "macro_equities",
+      "out_path": "/home/claude/btc_model/hypothesis_macro_equities.csv",
+      "out_sha": "ce5a03c748b10d4d741feb8072300caa3863f1a90498aa5fecdb479f18012c5e",
+      "source": "/home/claude/btc_model/data/hypotheses/macro_equities.parquet",
+      "source_sha": "fda80eca8b7d40ef1cf7efb9a4945d47e71c4f2530304d5fa305048020c960b8"
+    },
+    {
+      "group": "cme",
+      "out_path": "/home/claude/btc_model/hypothesis_cme.csv",
+      "out_sha": "88ae154971c9b0e8fe46f1bac7ff394f59c01d12213e65ee5f07e66a47335db9",
+      "source": "/home/claude/btc_model/data/hypotheses/cme.parquet",
+      "source_sha": "ff04a871016fdd142c0b33da9fc94bc7adfbab0810ac06ee86b04fbe43455f51"
+    },
+    {
+      "group": "crypto_derivatives",
+      "out_path": "/home/claude/btc_model/hypothesis_crypto_derivatives.csv",
+      "out_sha": "ce022146f77a999b2076815aaa11b9fd137fcea24632d1ad214022c9ca80b4c6",
+      "source": "/home/claude/btc_model/data/hypotheses/crypto_derivatives.parquet",
+      "source_sha": "bfd3ed6288b60ffb3e75efcd3a36aadf1f8012837db863ff956cc0c60d4cfc5a"
+    },
+    {
+      "group": "classic_cycle",
+      "out_path": "/home/claude/btc_model/hypothesis_classic_cycle.csv",
+      "out_sha": "87fd5b00f6394ff4ff6b9c92c40ec94a9dba1c068bfb629c5180cc14ec111c24",
+      "source": "/home/claude/btc_model/data/hypotheses/classic_cycle.parquet",
+      "source_sha": "f66cdc93212548dd8696e732864908faf5bdc780e547fb2314d3a1db8143dcd3"
+    },
+    {
+      "group": "etf_flows",
+      "out_path": "/home/claude/btc_model/hypothesis_etf_flows.csv",
+      "out_sha": "13a16813264a91a820a0bc60c12c70dbce84d2e4bde0ec248c2c5ff87a59461f",
+      "source": "/home/claude/btc_model/data/hypotheses/etf_flows.parquet",
+      "source_sha": "a709b27bc0faa644f52b21ccb044d825a889a909b6cce3b5df310c07896c9339"
+    },
+    {
+      "group": "eth",
+      "out_path": "/home/claude/btc_model/hypothesis_eth.csv",
+      "out_sha": "b39e5bb81bd8087d4a548bc6276243c6151b6c7a488eff57176494e7b7560fa0",
+      "source": "/home/claude/btc_model/data/hypotheses/eth.parquet",
+      "source_sha": "e82ac23abb261fae077f6356a1154b6bee55af78c4fe3974fb059b3c6f4f2bbc"
+    }
+  ],
+  "master_entries": [
+    {
+      "master_csv": "/home/claude/btc_model/master_daily_view_wf365.csv",
+      "master_sha": "9df44b1c28fc842b979e6e39bd553dc30039fe4cdc7456e72a64ea4e14778a08",
+      "source_files": {
+        "ensemble": "/home/claude/btc_model/data/final/ensemble_wf365_y_60.parquet",
+        "hypothesis_classic_cycle": "/home/claude/btc_model/data/hypotheses/classic_cycle.parquet",
+        "hypothesis_cme": "/home/claude/btc_model/data/hypotheses/cme.parquet",
+        "hypothesis_crypto_derivatives": "/home/claude/btc_model/data/hypotheses/crypto_derivatives.parquet",
+        "hypothesis_etf_flows": "/home/claude/btc_model/data/hypotheses/etf_flows.parquet",
+        "hypothesis_eth": "/home/claude/btc_model/data/hypotheses/eth.parquet",
+        "hypothesis_macro_equities": "/home/claude/btc_model/data/hypotheses/macro_equities.parquet",
+        "labels": "/home/claude/btc_model/data/derived/labels.parquet",
+        "regime": "/home/claude/btc_model/data/derived/regime.parquet"
+      },
+      "source_shas": {
+        "ensemble": "113eb4753047ec8e88c3fad08639fa0523a356e44b3df24ab9581384b705f7f5",
+        "hypothesis_classic_cycle": "f66cdc93212548dd8696e732864908faf5bdc780e547fb2314d3a1db8143dcd3",
+        "hypothesis_cme": "ff04a871016fdd142c0b33da9fc94bc7adfbab0810ac06ee86b04fbe43455f51",
+        "hypothesis_crypto_derivatives": "bfd3ed6288b60ffb3e75efcd3a36aadf1f8012837db863ff956cc0c60d4cfc5a",
+        "hypothesis_etf_flows": "a709b27bc0faa644f52b21ccb044d825a889a909b6cce3b5df310c07896c9339",
+        "hypothesis_eth": "e82ac23abb261fae077f6356a1154b6bee55af78c4fe3974fb059b3c6f4f2bbc",
+        "hypothesis_macro_equities": "fda80eca8b7d40ef1cf7efb9a4945d47e71c4f2530304d5fa305048020c960b8",
+        "labels": "83fc2d270ce50e6e4917a0b7d6fbfb8fec2966a43fb6f2887d55bf7779c0793c",
+        "regime": "b54ab7821367904fe6f3e56afaeab33405e9b985627ccc0604c5c40bda9eddb1"
+      }
+    },
+    {
+      "master_csv": "/home/claude/btc_model/master_daily_view_sf730.csv",
+      "master_sha": "7800768e2f75c5e51dc2852a1e8a47213a948865aa6319baa9bb22c6ab8bf3e5",
+      "source_files": {
+        "ensemble": "/home/claude/btc_model/data/final/ensemble_sf730_y_60.parquet",
+        "hypothesis_classic_cycle": "/home/claude/btc_model/data/hypotheses/classic_cycle.parquet",
+        "hypothesis_cme": "/home/claude/btc_model/data/hypotheses/cme.parquet",
+        "hypothesis_crypto_derivatives": "/home/claude/btc_model/data/hypotheses/crypto_derivatives.parquet",
+        "hypothesis_etf_flows": "/home/claude/btc_model/data/hypotheses/etf_flows.parquet",
+        "hypothesis_eth": "/home/claude/btc_model/data/hypotheses/eth.parquet",
+        "hypothesis_macro_equities": "/home/claude/btc_model/data/hypotheses/macro_equities.parquet",
+        "labels": "/home/claude/btc_model/data/derived/labels.parquet",
+        "regime": "/home/claude/btc_model/data/derived/regime.parquet"
+      },
+      "source_shas": {
+        "ensemble": "a10093acdd44b67c265fdbe0c61fcd7c81c9e4ea335bf5eeea7997776fd7d704",
+        "hypothesis_classic_cycle": "f66cdc93212548dd8696e732864908faf5bdc780e547fb2314d3a1db8143dcd3",
+        "hypothesis_cme": "ff04a871016fdd142c0b33da9fc94bc7adfbab0810ac06ee86b04fbe43455f51",
+        "hypothesis_crypto_derivatives": "bfd3ed6288b60ffb3e75efcd3a36aadf1f8012837db863ff956cc0c60d4cfc5a",
+        "hypothesis_etf_flows": "a709b27bc0faa644f52b21ccb044d825a889a909b6cce3b5df310c07896c9339",
+        "hypothesis_eth": "e82ac23abb261fae077f6356a1154b6bee55af78c4fe3974fb059b3c6f4f2bbc",
+        "hypothesis_macro_equities": "fda80eca8b7d40ef1cf7efb9a4945d47e71c4f2530304d5fa305048020c960b8",
+        "labels": "83fc2d270ce50e6e4917a0b7d6fbfb8fec2966a43fb6f2887d55bf7779c0793c",
+        "regime": "b54ab7821367904fe6f3e56afaeab33405e9b985627ccc0604c5c40bda9eddb1"
+      }
+    }
+  ],
+  "weight_history": {
+    "wf365_y_30": {
+      "path": "/home/claude/btc_model/data/final/weight_history_wf365_y_30.csv",
+      "sha": "9b7d8530fe397e5509982a4261d655951b04ad8c42c932dd47729129a2e80bfa"
+    },
+    "wf365_y_60": {
+      "path": "/home/claude/btc_model/data/final/weight_history_wf365_y_60.csv",
+      "sha": "780977eaf0b9cd76373d5136b23eadd544ced224b627c80c5fc9244804c7e1c9"
+    }
+  },
+  "weights_entry": {
+    "source_files": {
+      "sf730_y_30": "/home/claude/btc_model/data/final/ensemble_weights_sf730_y_30.csv",
+      "sf730_y_60": "/home/claude/btc_model/data/final/ensemble_weights_sf730_y_60.csv",
+      "wf365_y_30": "/home/claude/btc_model/data/final/ensemble_weights_wf365_y_30.csv",
+      "wf365_y_60": "/home/claude/btc_model/data/final/ensemble_weights_wf365_y_60.csv"
+    },
+    "source_shas": {
+      "sf730_y_30": "110485b4ea6ef34726880070e4e106bb1783e72dba38a0fdcb6539f62bcda6c1",
+      "sf730_y_60": "e20e168c572742e6e54ba4f3529b9ce074cc56cc422d590271ea6e801f180569",
+      "wf365_y_30": "86fa755522e723a7f3014281e2eec461fef9c3e96077e66b892c47206cd392bb",
+      "wf365_y_60": "4c51559c14b808a6912149149ae72b91b04925f9d560639e3e0a06faa09a29b6"
+    },
+    "weights_csv": "/home/claude/btc_model/weights.csv",
+    "weights_sha": "63fefeeacb2c3f653da14790647f39bea4ab61185bc9704e80f8b752395eb226"
+  }
+}
