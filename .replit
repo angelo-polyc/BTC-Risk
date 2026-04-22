@@ -1,0 +1,40 @@
+# Replit deployment config for the BTC drawdown-probability model ops layer.
+#
+# This file tells Replit's Reserved VM Deployment runner:
+#   - Which script starts the container (runner.sh — starts scheduler + API+MCP)
+#   - Which internal port the public HTTPS proxy should forward to
+#   - Language runtime + deps
+#
+# Secrets (BTC_API_TOKEN, BTC_MODEL_DIR) are injected at deploy time via the
+# Replit Secrets panel. Do NOT hard-code them here.
+
+modules = ["python-3.12"]
+
+# Entrypoint for `Run` button in the workspace (dev convenience — not used
+# by the deployment itself, which uses the [deployment] block below).
+run = "bash runner.sh"
+
+entrypoint = "runner.sh"
+
+[nix]
+channel = "stable-24_05"
+
+[deployment]
+# Reserved VM Deployment: a long-lived process, not serverless.
+deploymentTarget = "vm"
+
+# Replit's deployment proxy terminates HTTPS and forwards to whatever
+# internal port the container binds to. runner.sh reads $PORT from the
+# environment; the default is 8000.
+run = ["bash", "runner.sh"]
+
+# Health check: the /status endpoint requires bearer auth, so Replit's
+# default unauthenticated health probe can't use it. Fall back to /docs
+# (FastAPI's OpenAPI browser, which returns 200 unauthenticated — it only
+# lists endpoints, which are already known from the source code).
+# If you'd rather gate /docs too, set this to a custom unauthenticated
+# /healthz endpoint; not shipped by default.
+
+[[ports]]
+localPort = 8000
+externalPort = 80

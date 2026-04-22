@@ -79,6 +79,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 
 mcp = FastMCP(
     "btc-drawdown-model",
+    streamable_http_path="/",  # so the app can be mounted at any prefix
     instructions=(
         "Read-only access to the BTC drawdown-probability model. The model "
         "produces a daily long-BTC position (0-100%) based on five hypothesis "

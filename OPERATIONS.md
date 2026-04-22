@@ -11,8 +11,25 @@ Four services, all optional and independently runnable:
 | ---------------------- | ----------------- | ---------------------------------------------------- |
 | Daily pipeline runner  | `daily_pipeline.py` | Cron-style refresh: `run_all.sh` + monitors + audit  |
 | Audit log              | `audit_log.py`      | Git-commits today's model call, one commit per day   |
-| REST API               | `api_server.py`     | HTTP/JSON, bearer-auth, full history visible on deploy |
-| MCP server             | `mcp_server.py`     | Same surface as MCP tools over Streamable HTTP        |
+| REST API + MCP         | `api_server.py`     | HTTP/JSON REST and MCP (at `/mcp`) on one port, bearer-auth |
+| MCP server (standalone)| `mcp_server.py`     | Same MCP surface as a standalone app for local dev    |
+
+## Production topology (Replit Reserved VM Deployment)
+
+The production deployment is a single Replit Reserved VM Deployment running
+`runner.sh`, which in turn runs:
+
+  * `daily_pipeline.py` in the background (scheduler for the daily refresh)
+  * `api_server.py` in the foreground — binds `$PORT`, serves REST at `/`
+    and MCP at `/mcp` behind one bearer token
+
+One container, one public HTTPS URL, one TLS cert, one bearer token.
+`mcp_server.py` is NOT run as a separate process in production — its
+`FastMCP` instance is mounted into `api_server.py` at `/mcp` for a single-
+process topology. `mcp_server.py` remains runnable standalone for local
+development.
+
+See `.replit` for the deployment config and `runner.sh` for the entrypoint.
 
 ## One-time setup
 
@@ -262,14 +279,23 @@ git log --oneline -- paper_trading_log.csv | head
 
 ---
 
+## Phase 3 — REST API + MCP (combined in production)
+
 ### What it does
 
 Bearer-authenticated read-only HTTP/JSON API over the committed CSV
-artifacts. Because it serves the CSVs directly, the full history
-(~4,230 rows of model state, 26K rows of raw inputs, all six
-per-hypothesis series with sub-signals, walk-forward weight history
-since 2021-06-30, full drift-monitor history) is visible from the
-moment the service starts — no backfill, no incremental log.
+artifacts, plus the MCP tool surface mounted at `/mcp`. Because it
+serves the CSVs directly, the full history (~4,230 rows of model state,
+26K rows of raw inputs, all six per-hypothesis series with sub-signals,
+walk-forward weight history since 2021-06-30, full drift-monitor
+history) is visible from the moment the service starts — no backfill,
+no incremental log.
+
+**Single-port topology.** REST and MCP share one uvicorn process, one
+public HTTPS URL, and one bearer token. The MCP app from `mcp_server.py`
+is mounted into `api_server.py` at `/mcp`; its Streamable-HTTP session
+manager runs under FastAPI's lifespan context. This is the production
+configuration used by the Replit deployment via `runner.sh`.
 
 ### Endpoints
 
@@ -301,24 +327,30 @@ OpenAPI docs at `/docs` (also auth-gated).
 ```bash
 set -a && source .env.ops && set +a
 python3 api_server.py
-# or
-python3 -m uvicorn api_server:app --host 0.0.0.0 --port 8787
+# or (what runner.sh does in production):
+python3 -m uvicorn api_server:app --host 0.0.0.0 --port 8000
 ```
+
+Default port in the production deployment is whatever Replit injects as
+`$PORT` (typically 8000, which `.replit` maps to public HTTPS port 80).
+Locally, `BTC_API_PORT` (default 8787) controls the bind port when
+running `python3 api_server.py` directly.
 
 ### Verify it's working
 
 ```bash
 T="$BTC_API_TOKEN"
-curl -H "Authorization: Bearer $T" http://localhost:8787/status  | jq .latest_date
-curl -H "Authorization: Bearer $T" http://localhost:8787/today   | jq '{date, regime, position, percentile}'
-curl -H "Authorization: Bearer $T" http://localhost:8787/flags   | jq '{count, rows: (.rows | map(.signal))}'
+PORT=${BTC_API_PORT:-8787}
+curl -H "Authorization: Bearer $T" http://localhost:$PORT/status  | jq .latest_date
+curl -H "Authorization: Bearer $T" http://localhost:$PORT/today   | jq '{date, regime, position, percentile}'
+curl -H "Authorization: Bearer $T" http://localhost:$PORT/flags   | jq '{count, rows: (.rows | map(.signal))}'
 # Unauthenticated:
-curl -o /dev/null -w "%{http_code}\n" http://localhost:8787/today  # expect 403
+curl -o /dev/null -w "%{http_code}\n" http://localhost:$PORT/today  # expect 401
 ```
 
 ---
 
-## Phase 4 — MCP server
+## Phase 4 — MCP (mounted into the REST API in production)
 
 ### What it does
 
@@ -326,15 +358,24 @@ Exposes the same read surface as the REST API but as MCP tools,
 consumable by Claude Code (or any MCP-speaking agent) for
 "ask-the-model-directly" workflows.
 
-Transport: Streamable HTTP, default at `/mcp`.
-Auth: same bearer token as the REST API (`BTC_API_TOKEN`), enforced by
-a Starlette middleware in front of the MCP ASGI mount.
+**Production:** the `FastMCP` instance from `mcp_server.py` is mounted
+into `api_server.py` at `/mcp`. One uvicorn process, one port, one
+bearer token protects both surfaces. This is what `runner.sh` runs.
 
-17 tools, one-to-one with the REST endpoints above. See docstrings in
+**Local development:** `mcp_server.py` remains runnable standalone as a
+separate process on its own port (default 8788). This is useful when
+iterating on tool definitions without restarting the REST server, but
+the production topology does not use it.
+
+Transport: Streamable HTTP at `<base>/mcp`.
+Auth: same bearer token as the REST API (`BTC_API_TOKEN`), enforced by
+the same `BearerAuthMiddleware` in both mounted and standalone modes.
+
+17 tools, one-to-one with the REST endpoints. See docstrings in
 `mcp_server.py` for the full set; the ones an agent typically calls
 first are `get_status`, `get_today`, `get_flags`, `get_history`.
 
-### Run
+### Run standalone (local dev only)
 
 ```bash
 set -a && source .env.ops && set +a
@@ -343,17 +384,16 @@ python3 mcp_server.py
 python3 -m uvicorn mcp_server:app --host 0.0.0.0 --port 8788
 ```
 
-### Wire up Claude Code
+### Wire up Claude Code (production, mounted topology)
 
-In Claude Code's MCP config (`~/.claude/settings.json` or equivalent),
-add an entry for the server:
+In Claude Code's MCP config (`~/.claude/settings.json` or equivalent):
 
 ```json
 {
   "mcpServers": {
     "btc-drawdown-model": {
       "transport": "streamable-http",
-      "url": "https://<your-replit-host>/mcp",
+      "url": "https://<your-replit-deployment-host>/mcp",
       "headers": {
         "Authorization": "Bearer <paste BTC_API_TOKEN here>"
       }

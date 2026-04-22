@@ -60,6 +60,21 @@ def require_token(
 
 # ─── App ──────────────────────────────────────────────────────────────────────
 
+# Import MCP app early so its lifespan can be bridged into FastAPI's.
+from mcp_server import mcp as _mcp  # noqa: E402
+
+from contextlib import asynccontextmanager  # noqa: E402
+
+
+@asynccontextmanager
+async def _lifespan(app):
+    # Fail fast if unset; no point serving unauthenticated.
+    _expected_token()
+    # Run the MCP streamable-http session manager so mounted /mcp works.
+    async with _mcp.session_manager.run():
+        yield
+
+
 app = FastAPI(
     title="BTC Drawdown Model API",
     description=(
@@ -68,13 +83,8 @@ app = FastAPI(
         "shadow state, and raw inputs. Protected by bearer token."
     ),
     version="1.0",
+    lifespan=_lifespan,
 )
-
-
-@app.on_event("startup")
-def _check_token_on_startup() -> None:
-    # Fail fast if unset; no point serving unauthenticated.
-    _expected_token()
 
 
 # ─── Model state ──────────────────────────────────────────────────────────────
@@ -252,6 +262,19 @@ def status_endpoint() -> dict[str, Any]:
     """Lightweight freshness check: latest date + file mtimes for each CSV.
     Useful as the first thing an agent calls to ground its reasoning."""
     return da.get_status()
+
+
+# ─── Mount MCP server at /mcp ─────────────────────────────────────────────────
+#
+# The MCP Streamable HTTP app is defined in mcp_server.py. Importing it here
+# reuses the tool definitions and the bearer-auth middleware so one uvicorn
+# process serves both REST and MCP behind a single public URL and a single
+# bearer token. This is the production topology — mcp_server.py can still
+# be run standalone for local development.
+
+from mcp_server import app as _mcp_app  # noqa: E402
+
+app.mount("/mcp", _mcp_app)
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
