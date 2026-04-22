@@ -77,9 +77,43 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 
 # ─── MCP server + tools ───────────────────────────────────────────────────────
 
+from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
+
+
+def _allowed_hosts() -> list[str]:
+    """Host values the mounted MCP server will accept.
+
+    FastMCP's default transport security rejects any Host header that isn't
+    in its allowlist (empty by default = localhost-only after DNS rebinding
+    checks). In a production deployment behind a public HTTPS proxy the
+    deployment's hostname must be allowed explicitly.
+
+    Priority:
+      1. MCP_ALLOWED_HOSTS env var (comma-separated) if set — exact
+         production control, one hostname per deployment.
+      2. Safe defaults for local development: localhost / 127.0.0.1 /
+         0.0.0.0 on any port.
+
+    The runner.sh / Replit deployment should set MCP_ALLOWED_HOSTS to the
+    deployment's public hostname (e.g. "btc-risk.replit.app").
+    """
+    raw = os.environ.get("MCP_ALLOWED_HOSTS", "")
+    if raw.strip():
+        return [h.strip() for h in raw.split(",") if h.strip()]
+    return [
+        "localhost", "localhost:*",
+        "127.0.0.1", "127.0.0.1:*",
+        "0.0.0.0", "0.0.0.0:*",
+    ]
+
+
 mcp = FastMCP(
     "btc-drawdown-model",
     streamable_http_path="/",  # so the app can be mounted at any prefix
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_allowed_hosts(),
+    ),
     instructions=(
         "Read-only access to the BTC drawdown-probability model. The model "
         "produces a daily long-BTC position (0-100%) based on five hypothesis "
