@@ -9,8 +9,12 @@
 # service UI (Settings → Deploy).
 #
 # The earlier multi-service [[services]] array layout silently fell back
-# to Railpack autodetect, which is why the first deploy attempt failed
-# with "No start command detected". Don't reintroduce it.
+# to Railpack autodetect. Don't reintroduce it.
+#
+# Also: Railway does NOT run startCommand through a shell, so ${VAR:-default}
+# expansion does NOT work. The port is hardcoded to 8000 to match the
+# Dockerfile's ENV PORT=8000 / EXPOSE 8000. Railway routes traffic to the
+# exposed port automatically for Docker-based services.
 #
 # See RAILWAY_MIGRATION.md for the full setup flow.
 
@@ -19,7 +23,7 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "python3 -m uvicorn api_server:app --host 0.0.0.0 --port ${PORT:-8000}"
+startCommand = "python3 -m uvicorn api_server:app --host 0.0.0.0 --port 8000"
 healthcheckPath = "/docs"
 healthcheckTimeout = 10
 restartPolicyType = "ON_FAILURE"
