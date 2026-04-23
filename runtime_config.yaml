@@ -36,7 +36,7 @@ run_on_startup: false
 #   * shadow_tracker.py: similar.
 steps:
   - name: run_all
-    cmd: ["bash", "run_all.sh"]
+    cmd: ["bash", "run_all.sh", "--skip-deps"]
     timeout_sec: 1800
   - name: health_check
     cmd: ["python3", "health_check.py", "--out", "health_check.csv"]

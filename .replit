@@ -23,6 +23,13 @@ channel = "stable-24_05"
 # Reserved VM Deployment: a long-lived process, not serverless.
 deploymentTarget = "vm"
 
+# Build step: install the full dependency set ONCE at deploy time (not
+# on every daily pipeline run). `pip install --user` writes to
+# ~/.local, which is writable on Replit; the system nix store is not.
+# Scheduled pipeline runs use `run_all.sh --skip-deps` to bypass the
+# in-pipeline install.
+build = ["bash", "-c", "pip install --user -r requirements.txt"]
+
 # Replit's deployment proxy terminates HTTPS and forwards to whatever
 # internal port the container binds to. runner.sh reads $PORT from the
 # environment; the default is 8000.
