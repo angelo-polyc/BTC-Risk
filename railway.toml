@@ -8,13 +8,17 @@
 # from the same repo, with its startCommand and cron schedule set in the
 # service UI (Settings → Deploy).
 #
-# The earlier multi-service [[services]] array layout silently fell back
-# to Railpack autodetect. Don't reintroduce it.
+# PORT expansion: Railway does not run startCommand through a shell, so
+# ${PORT:-8000} passed as a literal to uvicorn in a previous attempt.
+# This version wraps the command in `sh -c '... exec ...'` so the shell
+# expands ${PORT:-8000} at runtime. `exec` replaces the shell with
+# uvicorn so tini's SIGTERM forwarding still reaches the app.
 #
-# Also: Railway does NOT run startCommand through a shell, so ${VAR:-default}
-# expansion does NOT work. The port is hardcoded to 8000 to match the
-# Dockerfile's ENV PORT=8000 / EXPOSE 8000. Railway routes traffic to the
-# exposed port automatically for Docker-based services.
+# Railway injects its own PORT env var (usually not 8000). The proxy
+# routes external traffic to *that* injected port — if uvicorn binds to
+# a hardcoded 8000 instead, the healthcheck fails with connection
+# refused. ${PORT:-8000} picks up Railway's injection when present and
+# falls back to 8000 for local `docker run`.
 #
 # See RAILWAY_MIGRATION.md for the full setup flow.
 
@@ -23,8 +27,8 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "python3 -m uvicorn api_server:app --host 0.0.0.0 --port 8000"
+startCommand = "sh -c 'exec python3 -m uvicorn api_server:app --host 0.0.0.0 --port ${PORT:-8000}'"
 healthcheckPath = "/docs"
-healthcheckTimeout = 10
+healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
