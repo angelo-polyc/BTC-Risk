@@ -91,6 +91,11 @@ def main() -> int:
         help="try to push, but exit 0 even if push fails (local commit is still made)",
     )
     ap.add_argument(
+        "--no-git", action="store_true",
+        help="skip git entirely: just write the CSV (use when log-dir is a "
+             "volume-backed data dir, not a git repo). Incompatible with --push.",
+    )
+    ap.add_argument(
         "--remote", default=os.environ.get("AUDIT_GIT_REMOTE", "origin"),
         help="git remote name for push (default: origin or $AUDIT_GIT_REMOTE)",
     )
@@ -99,6 +104,11 @@ def main() -> int:
         help="branch for push (default: current branch or $AUDIT_GIT_BRANCH)",
     )
     args = ap.parse_args()
+
+    if args.no_git and (args.push or args.push_best_effort):
+        print("ERROR: --no-git cannot be combined with --push or --push-best-effort",
+              file=sys.stderr)
+        return 1
 
     master_dir = Path(args.master_dir).expanduser().resolve()
     log_dir = Path(args.log_dir).expanduser().resolve()
@@ -110,10 +120,11 @@ def main() -> int:
         print(f"ERROR: master not found: {master_path}", file=sys.stderr)
         return 2
 
-    if not is_git_repo(log_dir):
+    if not args.no_git and not is_git_repo(log_dir):
         print(f"ERROR: not a git repository: {log_dir}", file=sys.stderr)
-        print("       run `git init` there and configure a remote, or point "
-              "--log-dir at an existing audit repo", file=sys.stderr)
+        print("       run `git init` there and configure a remote, point "
+              "--log-dir at an existing audit repo, or pass --no-git",
+              file=sys.stderr)
         return 3
 
     # ─── Read latest row ─────────────────────────────────────────────────────
@@ -151,6 +162,9 @@ def main() -> int:
 
     new_log.to_csv(log_path, index=False)
     print(f"appended row for {date_str} to {log_path}")
+
+    if args.no_git:
+        return 0
 
     # ─── Build commit message per v14 ops spec ──────────────────────────────
     regime = latest["regime"]

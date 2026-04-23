@@ -12,7 +12,7 @@ project_dir: .
 # Default: 22:00 UTC daily — after CME Friday close (settlement 21:00 UTC)
 # and far enough past daily Coinglass / Velo aggregation that endpoints are
 # stable. Change to match your venue preferences.
-cron: "15 8 * * *"
+cron: "0 22 * * *"
 timezone: UTC
 
 # Rotating log settings. One file per day, retained this many days.
@@ -45,13 +45,16 @@ steps:
     cmd: ["python3", "shadow_tracker.py", "--out", "shadow_state.csv"]
     timeout_sec: 300
   # audit_log MUST run last — it reads the regenerated master_daily_view and
-  # commits today's row to paper_trading_log.csv. Starts empty on deploy;
-  # no backfill. See OPERATIONS.md § Phase 2 for git setup.
+  # appends today's row to paper_trading_log.csv. Starts empty on deploy;
+  # no backfill. See OPERATIONS.md § Phase 2.
   #
-  # To push to a remote on every run, replace cmd with one of:
+  # --log-dir /app/data puts paper_trading_log.csv on the Railway persistent
+  # volume so it survives deploys. --no-git skips the git commit/push flow
+  # (the volume is not a git repo, and the container lacks GitHub push
+  # credentials anyway). If you later set up a deploy key / PAT, you can
+  # switch back to a git-backed flow:
   #   ["python3", "audit_log.py", "--push-best-effort"]   # push failures don't abort
   #   ["python3", "audit_log.py", "--push"]               # push failures mark sequence FAILED
-  # Defaults below = local-only commits; push is a separate concern.
   - name: audit_log
-    cmd: ["python3", "audit_log.py"]
+    cmd: ["python3", "audit_log.py", "--log-dir", "/app/data", "--no-git"]
     timeout_sec: 60
