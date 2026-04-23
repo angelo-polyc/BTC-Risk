@@ -1,33 +1,41 @@
 # Railway config for the BTC drawdown-probability model.
 #
-# Single-service config for the `web` service (FastAPI + MCP, always-on).
+# Single service, no volume. runner.sh (invoked by the Dockerfile CMD)
+# launches daily_pipeline.py's APScheduler in the background and uvicorn
+# in the foreground, both in the same container.
 #
-# IMPORTANT: Railway's railway.toml supports ONLY ONE service per file.
-# The cron service (daily_pipeline.py --once at 22:00 UTC) is NOT
-# configured here — it must be created manually in the Railway dashboard
-# from the same repo, with its startCommand and cron schedule set in the
-# service UI (Settings → Deploy).
+# Why no volume (for now): Railway uses bind mounts, so mounting a volume
+# at /app SHADOWS the code baked into the image and the app fails to
+# import. The proper fix is to refactor all writers to use /app/data and
+# mount the volume there — but that's a real refactor. For today, the
+# container filesystem is ephemeral across deploys but persists across
+# restarts, and freshness is handled by:
+#   - run_on_startup: true in runtime_config.yaml → pipeline runs on boot
+#   - APScheduler's daily cron (22:00 UTC) → runs every 24h thereafter
+# So every deploy gets a fresh cold pull from the data sources.
 #
-# PORT expansion: Railway does not run startCommand through a shell, so
-# ${PORT:-8000} passed as a literal to uvicorn in a previous attempt.
-# This version wraps the command in `sh -c '... exec ...'` so the shell
-# expands ${PORT:-8000} at runtime. `exec` replaces the shell with
-# uvicorn so tini's SIGTERM forwarding still reaches the app.
+# Why not a separate cron service: Railway does NOT support shared
+# volumes between services, and each service is capped at one volume.
+# A separate cron container would write to an ephemeral filesystem the
+# web service can't see. So we collapse to the single-service design
+# runner.sh was already built for. The APScheduler approach was only
+# problematic on Replit because Replit's supervisor kept killing
+# backgrounded processes — Railway does not have that behavior.
 #
-# Railway injects its own PORT env var (usually not 8000). The proxy
-# routes external traffic to *that* injected port — if uvicorn binds to
-# a hardcoded 8000 instead, the healthcheck fails with connection
-# refused. ${PORT:-8000} picks up Railway's injection when present and
-# falls back to 8000 for local `docker run`.
+# PORT: runner.sh handles ${PORT:=8000} internally via bash, so Railway's
+# injected PORT is picked up automatically. No sh -c wrapper needed.
 #
-# See RAILWAY_MIGRATION.md for the full setup flow.
+# Startup flow:
+#   tini (PID 1)  →  bash runner.sh  →  [bg] python3 daily_pipeline.py
+#                                     →  [fg] exec python3 -m uvicorn ...
 
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "sh -c 'exec python3 -m uvicorn api_server:app --host 0.0.0.0 --port ${PORT:-8000}'"
+# Explicit is better than implicit — this matches the Dockerfile CMD.
+startCommand = "bash runner.sh"
 healthcheckPath = "/docs"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
