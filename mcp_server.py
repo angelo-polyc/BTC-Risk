@@ -107,12 +107,47 @@ def _allowed_hosts() -> list[str]:
     ]
 
 
+def _allowed_origins() -> list[str]:
+    """Origin values the mounted MCP server will accept.
+
+    FastMCP's DNS rebinding protection checks both the Host header
+    (allowed_hosts) AND the Origin header (allowed_origins). Non-browser
+    clients like curl omit Origin and pass the Origin check vacuously;
+    browser-like MCP clients (including Claude Code CLI) send Origin and
+    get rejected by the default localhost-only allowlist.
+
+    Priority:
+      1. MCP_ALLOWED_ORIGINS env var (comma-separated, each with scheme) if
+         set — e.g. "https://btc-risk-model.up.railway.app".
+      2. Derived from MCP_ALLOWED_HOSTS if that's set: each host becomes
+         https://<host> and http://<host> origins. Port wildcards (:*)
+         are stripped on the origin side since browsers send explicit
+         port numbers.
+      3. Safe defaults for local development.
+    """
+    raw = os.environ.get("MCP_ALLOWED_ORIGINS", "")
+    if raw.strip():
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    hosts_raw = os.environ.get("MCP_ALLOWED_HOSTS", "")
+    if hosts_raw.strip():
+        origins: list[str] = []
+        for h in (x.strip() for x in hosts_raw.split(",") if x.strip()):
+            bare = h.split(":")[0] if h.endswith(":*") else h
+            origins.append(f"https://{bare}")
+            origins.append(f"http://{bare}")
+        return origins
+    return [
+        "http://localhost:*", "http://127.0.0.1:*", "http://0.0.0.0:*",
+    ]
+
+
 mcp = FastMCP(
     "btc-drawdown-model",
     streamable_http_path="/",  # so the app can be mounted at any prefix
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
         allowed_hosts=_allowed_hosts(),
+        allowed_origins=_allowed_origins(),
     ),
     instructions=(
         "Read-only access to the BTC drawdown-probability model. The model "
