@@ -1,0 +1,26 @@
+# Railway config for the BTC drawdown-probability model.
+#
+# Single-service config for the `web` service (FastAPI + MCP, always-on).
+#
+# IMPORTANT: Railway's railway.toml supports ONLY ONE service per file.
+# The cron service (daily_pipeline.py --once at 22:00 UTC) is NOT
+# configured here — it must be created manually in the Railway dashboard
+# from the same repo, with its startCommand and cron schedule set in the
+# service UI (Settings → Deploy).
+#
+# The earlier multi-service [[services]] array layout silently fell back
+# to Railpack autodetect, which is why the first deploy attempt failed
+# with "No start command detected". Don't reintroduce it.
+#
+# See RAILWAY_MIGRATION.md for the full setup flow.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python3 -m uvicorn api_server:app --host 0.0.0.0 --port ${PORT:-8000}"
+healthcheckPath = "/docs"
+healthcheckTimeout = 10
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
