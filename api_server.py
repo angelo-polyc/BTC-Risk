@@ -24,18 +24,27 @@ OpenAPI docs at /docs once authorized.
 """
 from __future__ import annotations
 
+import json
 import os
 import secrets
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.responses import HTMLResponse
+from fastapi.security import (
+    HTTPAuthorizationCredentials,
+    HTTPBasic,
+    HTTPBasicCredentials,
+    HTTPBearer,
+)
 
 import data_access as da
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
 
 _bearer = HTTPBearer(auto_error=True)
+_basic = HTTPBasic(auto_error=True)
 
 
 def _expected_token() -> str:
@@ -56,6 +65,28 @@ def require_token(
     if not secrets.compare_digest(creds.credentials, expected):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="invalid bearer token")
+
+
+def _verify_dashboard_pw(
+    creds: Annotated[HTTPBasicCredentials, Depends(_basic)],
+) -> None:
+    """Gate /dashboard behind BTC_DASHBOARD_PASSWORD. The browser's built-in
+    Basic-Auth prompt is lower friction than a login form, and the dashboard
+    is single-user personal infra — the password is separate from
+    BTC_API_TOKEN so it can be rotated independently. If the env var is
+    unset we refuse rather than serve anonymously."""
+    expected = os.environ.get("BTC_DASHBOARD_PASSWORD", "")
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="BTC_DASHBOARD_PASSWORD is unset on the server",
+        )
+    if not secrets.compare_digest(creds.password, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid password",
+            headers={"WWW-Authenticate": 'Basic realm="BTC Dashboard"'},
+        )
 
 
 # ─── App ──────────────────────────────────────────────────────────────────────
@@ -262,6 +293,37 @@ def status_endpoint() -> dict[str, Any]:
     """Lightweight freshness check: latest date + file mtimes for each CSV.
     Useful as the first thing an agent calls to ground its reasoning."""
     return da.get_status()
+
+
+# ─── Browser dashboard ────────────────────────────────────────────────────────
+#
+# Serves dashboard.html from disk, substituting the bearer token into the
+# placeholder so the browser JS can then call the /today, /history etc.
+# endpoints over the same bearer-auth channel the MCP server and agent
+# clients use. Access is gated behind Basic Auth (BTC_DASHBOARD_PASSWORD);
+# the bearer token remains visible in the page source to anyone who auths,
+# which is the right trust boundary for single-user personal infra.
+
+_DASHBOARD_HTML_PATH = Path(__file__).parent / "dashboard.html"
+
+
+@app.get("/dashboard", response_class=HTMLResponse,
+         dependencies=[Depends(_verify_dashboard_pw)])
+def dashboard() -> HTMLResponse:
+    if not _DASHBOARD_HTML_PATH.exists():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="dashboard.html not found next to api_server.py",
+        )
+    html = _DASHBOARD_HTML_PATH.read_text(encoding="utf-8")
+    token = _expected_token()
+    # json.dumps yields a quoted JS string literal with any special chars
+    # (backslashes, quotes, control bytes) safely escaped. The template
+    # placeholder is the quoted form "{{BTC_API_TOKEN}}" — we replace the
+    # whole quoted form so the output is valid JS regardless of token
+    # shape.
+    html = html.replace('"{{BTC_API_TOKEN}}"', json.dumps(token))
+    return HTMLResponse(content=html)
 
 
 # ─── Mount MCP server at /mcp ─────────────────────────────────────────────────

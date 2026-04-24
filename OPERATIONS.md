@@ -51,6 +51,13 @@ Create `.env.ops` in the project root — **not committed to git**:
 #   python3 -c "import secrets; print(secrets.token_hex(32))"
 BTC_API_TOKEN=<paste generated token here>
 
+# Password for the browser dashboard at /dashboard. Pick something
+# memorable — browser will prompt for it via Basic Auth. Rotate
+# independently of BTC_API_TOKEN. On Railway, add this to the Service
+# Variables panel alongside BTC_API_TOKEN (not to .env.ops, which isn't
+# read by the Railway deployment).
+BTC_DASHBOARD_PASSWORD=<pick something memorable>
+
 # Absolute path to the project checkout
 BTC_MODEL_DIR=/home/runner/btc_model
 
@@ -346,6 +353,41 @@ curl -H "Authorization: Bearer $T" http://localhost:$PORT/today   | jq '{date, r
 curl -H "Authorization: Bearer $T" http://localhost:$PORT/flags   | jq '{count, rows: (.rows | map(.signal))}'
 # Unauthenticated:
 curl -o /dev/null -w "%{http_code}\n" http://localhost:$PORT/today  # expect 401
+```
+
+### Browser dashboard (`/dashboard`)
+
+Mounted into the same `api_server.py` process alongside the REST and MCP
+routes. Served at `https://btc-risk-model.up.railway.app/dashboard` in
+production (on Railway) and at `http://localhost:$PORT/dashboard`
+locally. The browser's built-in Basic-Auth prompt gates access behind
+`BTC_DASHBOARD_PASSWORD`; the server then reads `dashboard.html` from
+disk and substitutes the bearer token into the page so the client-side
+JS can call the same REST endpoints the MCP clients and agents use. All
+fetches in the page use relative paths, so the Replit→Railway URL change
+(or any future host change) is transparent. The bearer token is visible
+in page source once authenticated — the trust boundary is "anyone with
+the dashboard password also has the bearer token," which matches
+single-user personal infra. To sign out, close all tabs for the host;
+Basic-Auth credentials are discarded with the process.
+
+Panels rendered: today's call hero with contribution breakdown, BTC
+price & position (dual-axis, regime-banded), ensemble percentile with
+threshold bands (read live from `/thresholds`), position-function mini
+chart, drivers table + flags from `/health`, AUC attribution heatmap,
+hypothesis composites over time, sub-signal risk heatmap, track record
+(equity curve + perf table scoped to `/manifest.canonical_start`), and
+a data-freshness pipeline footer. All ranges have 1Y/3Y/ALL toggles.
+
+Railway setup: add `BTC_DASHBOARD_PASSWORD` to the Service → Variables
+panel alongside `BTC_API_TOKEN`. Redeploy (Railway doesn't always
+auto-redeploy on variable changes).
+
+Verify:
+
+```bash
+curl -u any:$BTC_DASHBOARD_PASSWORD https://btc-risk-model.up.railway.app/dashboard | head -c 200
+# expect HTML starting with <!DOCTYPE html>
 ```
 
 ---

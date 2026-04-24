@@ -1,0 +1,2382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280, initial-scale=0.5, maximum-scale=2.0">
+<title>BTC Drawdown Model — Live</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@200;300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #faf8f3;
+    --bg-soft: #f2eee4;
+    --bg-row: #f6f3ec;
+    --ink: #0e0e0e;
+    --ink-soft: #545450;
+    --ink-softer: #8a8780;
+    --rule: #c0bbad;
+    --rule-soft: #dcd7c8;
+    --rule-hair: #ebe6d8;
+
+    --bull: #2e6a3b;
+    --neutral: #faf8f3;
+    --bear: #b5381f;
+
+    --h-me: #1e3d66;
+    --h-cm: #c55a10;
+    --h-cd: #6d2a62;
+    --h-cc: #0f5c5c;
+    --h-ef: #ad1f50;
+    --h-et: #3b5a1e;
+
+    --accent: #b5381f;
+    --btc: #f7931a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; font-style: normal !important; }
+
+  html { background: var(--bg); }
+
+  body {
+    font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+    font-weight: 400;
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--ink);
+    background: var(--bg);
+    padding: 36px 56px 48px;
+    max-width: 1440px;
+    margin: 0 auto;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "ss01" 1;
+  }
+
+  .num, tt, .mono {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule); }
+  a:hover { text-decoration-color: var(--ink); }
+
+  button {
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+    background: transparent;
+    border: 1px solid var(--rule);
+    padding: 3px 9px;
+    cursor: pointer;
+    line-height: 1.3;
+  }
+  button:hover { border-color: var(--ink); }
+
+  /* ═══ masthead ═══ */
+  .masthead {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--ink);
+    margin-bottom: 6px;
+  }
+  .masthead .brand { display: flex; align-items: baseline; gap: 14px; }
+  .masthead .mark {
+    font-weight: 700;
+    font-size: 15.5px;
+    letter-spacing: -0.005em;
+    color: var(--ink);
+  }
+  .masthead .variant {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+    letter-spacing: 0.02em;
+    font-weight: 400;
+  }
+  .masthead .right {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .masthead .date-right {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-soft);
+    letter-spacing: 0.02em;
+  }
+  .masthead .actions { display: flex; gap: 6px; }
+  .masthead .actions button {
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
+    color: var(--ink-soft);
+  }
+  .masthead .actions button:hover { color: var(--ink); }
+  .masthead .hint {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--ink-softer);
+    letter-spacing: 0.02em;
+  }
+
+  /* ═══ sub-masthead (freshness strip) ═══ */
+  .sub-masthead {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 32px;
+  }
+  .sub-masthead .kicker {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 10.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .sub-masthead .summary {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--ink);
+    letter-spacing: 0.01em;
+  }
+  .sub-masthead .summary .v { font-weight: 500; }
+  .sub-masthead .summary .sep { color: var(--rule); padding: 0 6px; }
+
+  /* ═══ section scaffolding ═══ */
+  section { margin-bottom: 40px; }
+
+  .section-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 18px;
+  }
+  .section-head h2 {
+    font-size: 13.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  .section-head-right {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .section-head .meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+  }
+
+  /* ═══ placeholder / error states ═══ */
+  .placeholder {
+    padding: 28px 24px;
+    background: var(--bg-soft);
+    border: 1px solid var(--rule-soft);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--ink-softer);
+    text-align: center;
+    letter-spacing: 0.02em;
+  }
+  .placeholder.tall { padding: 60px 24px; }
+  .placeholder.error { color: var(--bear); border-color: var(--bear); background: transparent; }
+
+  /* ═══ toggle (1Y / 3Y / ALL) ═══ */
+  .toggle {
+    display: inline-flex;
+    border: 1px solid var(--rule);
+  }
+  .toggle button {
+    border: none;
+    border-right: 1px solid var(--rule);
+    padding: 3px 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+    letter-spacing: 0.04em;
+    background: transparent;
+  }
+  .toggle button:last-child { border-right: none; }
+  .toggle button.active {
+    background: var(--ink);
+    color: var(--bg);
+  }
+  .toggle button:hover:not(.active) { color: var(--ink); }
+
+  /* ═══ hero metrics ═══ */
+  .hero:not(.placeholder) {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    margin-bottom: 56px;
+    padding: 0;
+    background: transparent;
+    border-top: 1px solid var(--ink);
+    border-bottom: 1px solid var(--ink);
+    text-align: left;
+  }
+  .metric {
+    padding: 16px 24px 18px;
+    border-right: 1px solid var(--rule);
+    position: relative;
+  }
+  .metric:last-child { border-right: none; }
+  .metric .label {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 10px;
+  }
+  .metric .value {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 300;
+    font-size: 48px;
+    line-height: 1;
+    letter-spacing: -0.035em;
+    color: var(--ink);
+    margin-bottom: 10px;
+    font-variant-numeric: tabular-nums;
+  }
+  .metric .value.bear { color: var(--bear); }
+  .metric .value.bull { color: var(--bull); }
+  .metric .annot {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 12px;
+    color: var(--ink-soft);
+    line-height: 1.5;
+  }
+  .metric .annot .mono { color: var(--ink); font-size: 11.5px; }
+  .metric .annot .sep { color: var(--rule); padding: 0 4px; }
+
+  .regime-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 36px;
+    padding: 0 16px;
+    background: var(--bear);
+    color: #fdf8f2;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 700;
+    font-size: 21px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    line-height: 1;
+  }
+  .regime-pill.regime-bull { background: var(--bull); color: #fdf8f2; }
+  .regime-pill.regime-neutral {
+    background: var(--bg);
+    color: var(--ink);
+    border: 1px solid var(--ink);
+    height: 34px;
+  }
+  .metric .value.has-pill {
+    display: flex;
+    align-items: center;
+    height: 48px;
+    padding: 0;
+    line-height: 1;
+  }
+
+  /* ═══ drivers table ═══ */
+  table.drivers {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+    table-layout: fixed;
+  }
+  table.drivers col.col-name    { width: 28%; }
+  table.drivers col.col-score   { width: 13%; }
+  table.drivers col.col-weight  { width: 13%; }
+  table.drivers col.col-contrib { width: 16%; }
+  table.drivers col.col-bar     { width: 30%; }
+  table.drivers th {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    text-align: right;
+    padding: 8px 14px 12px 0;
+    border-bottom: 1px solid var(--ink);
+  }
+  table.drivers th:first-child { text-align: left; padding-left: 0; }
+  table.drivers th:last-child { text-align: left; }
+  table.drivers td {
+    padding: 11px 14px 11px 0;
+    border-bottom: 1px solid var(--rule-hair);
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--ink);
+  }
+  table.drivers td:first-child {
+    text-align: left;
+    padding-left: 0;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 400;
+  }
+  table.drivers td .swatch {
+    display: inline-block;
+    width: 10px; height: 10px;
+    margin-right: 10px;
+    vertical-align: 0px;
+  }
+  table.drivers td.contrib { font-weight: 500; }
+  table.drivers td.bar-cell {
+    position: relative;
+    padding: 11px 0 11px 12px;
+    text-align: left;
+  }
+  table.drivers td.bar-cell .bar {
+    display: inline-block;
+    height: 10px;
+    vertical-align: 0;
+    max-width: 100%;
+  }
+  table.drivers tr:last-child td { border-bottom: 1px solid var(--ink); }
+
+  /* ═══ AUC attribution heatmap ═══ */
+  .heatmap-group {
+    margin-bottom: 3px;
+    display: flex;
+    align-items: stretch;
+    overflow: hidden;
+  }
+  .heatmap-group-label {
+    width: 128px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink);
+    padding-right: 10px;
+  }
+  .heatmap-group-label.reference {
+    color: var(--ink-soft);
+    font-weight: 500;
+    font-style: italic !important;
+  }
+  .heatmap-cells {
+    display: flex;
+    flex: 1;
+    gap: 3px;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .heatmap-cell {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 4px 12px;
+    text-align: center;
+    border: 1px solid var(--rule-hair);
+    position: relative;
+    overflow: hidden;
+  }
+  .heatmap-cell .cell-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+    margin-bottom: 5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .heatmap-cell .cell-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .heatmap-cell .cell-is {
+    margin-top: 3px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    opacity: 0.6;
+  }
+  .auc-legend {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 14px;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 11px;
+    color: var(--ink-soft);
+    align-items: center;
+  }
+  .auc-legend .swatch {
+    display: inline-block;
+    width: 40px;
+    height: 10px;
+    background: linear-gradient(to right, var(--bear), var(--bg-soft), var(--bull));
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  /* ═══ flags panel ═══ */
+  table.flags {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+  }
+  table.flags th {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    text-align: left;
+    padding: 8px 14px 10px 0;
+    border-bottom: 1px solid var(--ink);
+  }
+  table.flags th.num { text-align: right; }
+  table.flags td {
+    padding: 9px 14px 9px 0;
+    border-bottom: 1px solid var(--rule-hair);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink);
+  }
+  table.flags td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.flags td.reason { color: var(--ink-soft); font-size: 11px; }
+  table.flags td .swatch {
+    display: inline-block;
+    width: 8px; height: 8px;
+    margin-right: 8px;
+    vertical-align: 1px;
+  }
+  table.flags td.level-composite { font-weight: 600; color: var(--bear); }
+  .flags-empty {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    padding: 18px 0;
+    text-align: left;
+  }
+
+  /* ═══ chart scaffolding ═══ */
+  svg.chart {
+    display: block;
+    width: 100%;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+  }
+  svg.regime-strip {
+    display: block;
+    width: 100%;
+  }
+  .chart-block { margin-bottom: 28px; }
+  .chart-caption {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+  }
+  .chart-caption .title {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .chart-caption .legend {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+    display: flex; gap: 18px; flex-wrap: wrap;
+  }
+  .chart-caption .legend .item {
+    display: flex; align-items: center; gap: 7px;
+  }
+  .chart-caption .legend .sq { width: 10px; height: 10px; }
+  .chart-caption .legend .ln { width: 16px; height: 2px; }
+  .regime-strip-wrap { margin-bottom: 16px; }
+  .regime-strip-label {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 4px;
+  }
+
+  /* ═══ perf table (track record) ═══ */
+  table.perf {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+  }
+  table.perf th {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    text-align: right;
+    padding: 8px 20px 8px 0;
+    border-bottom: 1px solid var(--ink);
+  }
+  table.perf th:first-child { text-align: left; padding-left: 0; }
+  table.perf td {
+    padding: 10px 20px 10px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    color: var(--ink);
+  }
+  table.perf td:first-child {
+    text-align: left;
+    padding-left: 0;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 500;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  table.perf td.strat { font-weight: 500; }
+  table.perf td.bh { color: var(--ink-softer); font-weight: 300; }
+  table.perf td.delta { color: var(--ink-soft); font-weight: 400; }
+  table.perf td.delta.pos { color: var(--bull); }
+  table.perf td.delta.neg { color: var(--bear); }
+  table.perf tr:last-child td { border-bottom: 1px solid var(--ink); }
+  .perf-footer {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    margin-top: 8px;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* ═══ position-function mini-chart ═══ */
+  .posfn-box {
+    background: var(--bg-soft);
+    border: 1px solid var(--rule);
+    padding: 16px 20px 18px;
+  }
+  .posfn-box .hdr {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+  }
+  .posfn-box .hdr .title {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .posfn-box .hdr .today {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    font-size: 11px;
+    color: var(--ink-soft);
+  }
+  .posfn-box .today-value { color: var(--accent); font-weight: 600; }
+  .posfn-box .note {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 11px;
+    color: var(--ink-soft);
+    line-height: 1.5;
+    margin-top: 8px;
+    border-top: 1px solid var(--rule-soft);
+    padding-top: 10px;
+  }
+
+  /* ═══ layout ═══ */
+  .drivers-wrap {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 28px;
+  }
+
+  /* ═══ pipeline footer ═══ */
+  .pipeline {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .pipeline .feeds {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  .pipeline .feed {
+    display: inline-flex;
+    gap: 6px;
+    align-items: baseline;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+  }
+  .pipeline .feed .status.ok { color: var(--bull); }
+  .pipeline .feed .status.stale { color: var(--bear); }
+  .pipeline .meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-softer);
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══ MASTHEAD ═══ -->
+<div class="masthead">
+  <div class="brand">
+    <div class="mark">BTC DRAWDOWN MODEL</div>
+    <div class="variant">wf365 · y_60 · v14 · live</div>
+  </div>
+  <div class="right">
+    <div class="date-right" id="masthead-date">—</div>
+    <div class="actions">
+      <button id="btn-refresh" type="button" title="Re-fetch all data">↻ REFRESH</button>
+    </div>
+    <div class="hint" title="Close all tabs for btc-risk.replit.app to end the browser session">close tab to sign out</div>
+  </div>
+</div>
+
+<!-- ═══ SUB-MASTHEAD (freshness strip) ═══ -->
+<div class="sub-masthead">
+  <div class="kicker">Daily state · live</div>
+  <div class="summary" id="summary-strip">—</div>
+</div>
+
+<!-- ═══ DASHBOARD BODY ═══ -->
+
+<!-- Today's call hero — populated in Phase 4 -->
+<div class="hero placeholder tall" id="hero">today's call · awaiting fetch</div>
+
+<!-- BTC price & long position — populated in Phase 5 -->
+<section>
+  <div class="section-head">
+    <h2>BTC price &amp; long position</h2>
+    <div class="section-head-right">
+      <div class="meta" id="btc-price-meta">—</div>
+      <div class="toggle" id="toggle-btc">
+        <button data-range="1y" class="active">1Y</button>
+        <button data-range="3y">3Y</button>
+        <button data-range="all">ALL</button>
+      </div>
+    </div>
+  </div>
+  <div class="placeholder tall" id="chart-btc-pos">btc + position chart · awaiting fetch</div>
+</section>
+
+<!-- Ensemble percentile top — populated in Phase 5 -->
+<section>
+  <div class="section-head">
+    <h2>Ensemble percentile</h2>
+    <div class="section-head-right">
+      <div class="meta" id="pct-top-meta">—</div>
+      <div class="toggle" id="toggle-pct-top">
+        <button data-range="1y" class="active">1Y</button>
+        <button data-range="3y">3Y</button>
+        <button data-range="all">ALL</button>
+      </div>
+    </div>
+  </div>
+  <div class="placeholder tall" id="chart-pct-top">percentile chart · awaiting fetch</div>
+</section>
+
+<!-- Position function — full-width row (moved from Drivers on 2026-04-23) -->
+<section>
+  <div class="section-head">
+    <h2>Position function</h2>
+    <div class="section-head-right">
+      <div class="meta" id="posfn-meta">percentile → position mapping · today's point marked</div>
+    </div>
+  </div>
+  <div class="placeholder tall" id="posfn-box">position function · awaiting fetch</div>
+</section>
+
+<!-- Track record — populated in Phase 5 -->
+<section>
+  <div class="section-head">
+    <h2>Track record</h2>
+    <div class="section-head-right">
+      <div class="meta" id="perf-meta">—</div>
+      <div class="toggle" id="toggle-tr">
+        <button data-range="1y" class="active">1Y</button>
+        <button data-range="3y">3Y</button>
+        <button data-range="all">ALL</button>
+      </div>
+    </div>
+  </div>
+  <div class="placeholder tall" id="chart-equity">equity curve · awaiting fetch</div>
+  <div class="placeholder" id="perf-table" style="margin-top:14px">perf table · awaiting fetch</div>
+</section>
+
+<!-- Drivers — populated in Phase 4 -->
+<section>
+  <div class="section-head">
+    <h2>Drivers (Current Regime)</h2>
+    <div class="section-head-right">
+      <div class="meta" id="drivers-meta">—</div>
+    </div>
+  </div>
+  <div class="placeholder" id="drivers-table">drivers table · awaiting fetch</div>
+</section>
+
+<!-- State over time — populated in Phase 5 -->
+<section>
+  <div class="section-head">
+    <h2>State over time</h2>
+    <div class="section-head-right">
+      <div class="meta" id="state-meta">—</div>
+      <div class="toggle" id="toggle-state">
+        <button data-range="1y" class="active">1Y</button>
+        <button data-range="3y">3Y</button>
+        <button data-range="all">ALL</button>
+      </div>
+    </div>
+  </div>
+  <div class="placeholder" id="regime-strip" style="margin-bottom:12px">regime strip · awaiting fetch</div>
+  <div class="placeholder tall" id="chart-price">price + regime · awaiting fetch</div>
+  <div class="placeholder tall" id="chart-explorer" style="margin-top:20px">hypothesis composites · awaiting fetch</div>
+</section>
+
+<!-- Signal Stress Map — sub-signal current-value heatmap (moved out of State over time 2026-04-23) -->
+<section>
+  <div class="section-head">
+    <h2>Signal Stress Map</h2>
+    <div class="section-head-right">
+      <div class="meta">current sub-signal stress · 0.00 = benign (green) · 1.00 = extreme (red) · swatch = trailing-window avg</div>
+    </div>
+  </div>
+  <div class="placeholder tall" id="heatmap-grid">signal stress map · awaiting fetch</div>
+</section>
+
+<!-- Flags callout — populated in Phase 4 -->
+<section>
+  <div class="section-head">
+    <h2>Drift monitor flags</h2>
+    <div class="section-head-right">
+      <div class="meta" id="flags-meta">—</div>
+    </div>
+  </div>
+  <div class="placeholder" id="flags-panel">flags · awaiting fetch</div>
+</section>
+
+<!-- Pipeline footer — populated in Phase 4 -->
+<div class="pipeline">
+  <div class="feeds" id="pipeline-feeds">
+    <div class="feed"><span class="name">pipeline</span><span class="status" id="pipeline-status">—</span></div>
+  </div>
+  <div class="meta" id="pipeline-meta">—</div>
+</div>
+
+<script>
+/* ============================================================
+ * Phase 4 — static panels (hero, drivers, flags, AUC grid,
+ *   pipeline footer, freshness header). No time-series charts
+ *   yet (those are Phase 5).
+ *
+ * Orchestration:
+ *   fetchAll()   — 15 parallel GETs → STATE
+ *   renderAll()  — calls each static panel renderer in order;
+ *                  each renderer guards on STATE[key].ok and
+ *                  falls back to a per-panel error state. Panels
+ *                  that have no renderer yet keep the Phase 3
+ *                  `✓ /endpoint · N rows` status line.
+ * ============================================================ */
+
+const API_TOKEN = "{{BTC_API_TOKEN}}";
+const API_BASE  = "";   /* same-origin; /dashboard is served by the API */
+const FETCH_TIMEOUT_MS = 20000;
+
+const HYPS = [
+  { col: "macro_equities",     name: "Macro & Equities",    color: "var(--h-me)" },
+  { col: "cme",                name: "CME positioning",     color: "var(--h-cm)" },
+  { col: "crypto_derivatives", name: "Crypto Derivatives",  color: "var(--h-cd)" },
+  { col: "classic_cycle",      name: "Classic Cycle",       color: "var(--h-cc)" },
+  { col: "etf_flows",          name: "ETF Flows",           color: "var(--h-ef)" },
+];
+
+const HYP_SHORT_LABELS = {
+  macro_equities:     "Macro & Eq",
+  cme:                "CME",
+  crypto_derivatives: "Crypto Deriv",
+  classic_cycle:      "Classic Cycle",
+  etf_flows:          "ETF Flows",
+  eth:                "ETH (reference)",
+};
+
+const HYP_COLORS = {
+  macro_equities: "var(--h-me)",
+  cme: "var(--h-cm)",
+  crypto_derivatives: "var(--h-cd)",
+  classic_cycle: "var(--h-cc)",
+  etf_flows: "var(--h-ef)",
+  eth: "var(--h-et)",
+};
+
+/* Endpoints. panelId is the DOM id whose placeholder is updated
+   with a Phase 3 status line when the panel has no real Phase 4
+   renderer yet. */
+const ENDPOINTS = [
+  { key: "manifest",       path: "/manifest",               panelId: null },
+  { key: "status",         path: "/status",                 panelId: null },
+  { key: "today",          path: "/today",                  panelId: null,
+    params: { variant: "wf365" } },
+  { key: "history",        path: "/history",                panelId: "chart-btc-pos",
+    params: { variant: "wf365" } },
+  { key: "weights",        path: "/weights",                panelId: null },
+  { key: "thresholds",     path: "/thresholds",             panelId: "posfn-box" },
+  { key: "flags",          path: "/flags",                  panelId: null,
+    softFail: true },
+  { key: "health",         path: "/health",                 panelId: null,
+    softFail: true },
+  { key: "data_inventory", path: "/data_inventory",         panelId: null },
+  { key: "hyp_me",  path: "/hypothesis/macro_equities",     panelId: null },
+  { key: "hyp_cm",  path: "/hypothesis/cme",                panelId: null },
+  { key: "hyp_cd",  path: "/hypothesis/crypto_derivatives", panelId: null },
+  { key: "hyp_cc",  path: "/hypothesis/classic_cycle",      panelId: null },
+  { key: "hyp_ef",  path: "/hypothesis/etf_flows",          panelId: null },
+  { key: "hyp_et",  path: "/hypothesis/eth",                panelId: null },
+];
+
+let STATE = {};
+
+/* ── api() utility ─────────────────────────────────────────── */
+
+class ApiError extends Error {
+  constructor(message, { status = 0, path = "", body = null } = {}) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.path = path;
+    this.body = body;
+  }
+}
+
+function buildQuery(params) {
+  if (!params) return "";
+  const entries = Object.entries(params).filter(
+    ([, v]) => v !== null && v !== undefined && v !== ""
+  );
+  if (!entries.length) return "";
+  return "?" + entries
+    .map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v))
+    .join("&");
+}
+
+async function api(path, { params = null, timeout = FETCH_TIMEOUT_MS } = {}) {
+  const url = API_BASE + path + buildQuery(params);
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeout);
+  let res;
+  try {
+    res = await fetch(url, {
+      method: "GET",
+      headers: { "Authorization": "Bearer " + API_TOKEN, "Accept": "application/json" },
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    clearTimeout(t);
+    if (e.name === "AbortError") throw new ApiError("timeout after " + timeout + "ms", { path });
+    throw new ApiError("network error: " + e.message, { path });
+  }
+  clearTimeout(t);
+  if (!res.ok) {
+    let body = null;
+    try { body = await res.text(); } catch (_) {}
+    throw new ApiError("http " + res.status, { status: res.status, path, body });
+  }
+  try { return await res.json(); }
+  catch (e) { throw new ApiError("bad json: " + e.message, { status: res.status, path }); }
+}
+
+/* ── fetchAll() ────────────────────────────────────────────── */
+
+async function fetchAll() {
+  const t0 = performance.now();
+  const results = await Promise.allSettled(
+    ENDPOINTS.map(ep => api(ep.path, { params: ep.params }))
+  );
+  const elapsed_ms = Math.round(performance.now() - t0);
+
+  STATE = {};
+  let ok = 0, fail = 0;
+  const failed_keys = [];
+  const auth_failures = [];
+
+  ENDPOINTS.forEach((ep, i) => {
+    const r = results[i];
+    if (r.status === "fulfilled") {
+      STATE[ep.key] = { ok: true, data: r.value };
+      ok++;
+    } else {
+      STATE[ep.key] = { ok: false, error: r.reason };
+      fail++;
+      failed_keys.push(ep.key);
+      if (r.reason instanceof ApiError && r.reason.status === 401) {
+        auth_failures.push(ep.key);
+      }
+    }
+  });
+
+  return { ok, fail, elapsed_ms, failed_keys, auth_failures };
+}
+
+/* ── Utilities ─────────────────────────────────────────────── */
+
+function rowCount(resp) {
+  if (!resp || typeof resp !== "object") return null;
+  if (Array.isArray(resp)) return resp.length;
+  if (typeof resp.count === "number") return resp.count;
+  if (Array.isArray(resp.rows)) return resp.rows.length;
+  return null;
+}
+
+function setPanelError(id, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = "placeholder error";
+  el.textContent = "✕ " + msg;
+}
+
+function setPanelNote(id, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = "placeholder";
+  el.textContent = msg;
+}
+
+function fmtPct(n, digits) {
+  digits = digits == null ? 2 : digits;
+  return (n == null || !isFinite(n)) ? "—" : n.toFixed(digits);
+}
+
+function fmtSigned(n, digits) {
+  digits = digits == null ? 2 : digits;
+  if (n == null || !isFinite(n)) return "—";
+  return (n >= 0 ? "+" : "") + n.toFixed(digits);
+}
+
+/* Color helpers for the AUC heatmap — same interpolation as the mock. */
+function aucColor(val) {
+  if (val == null || !isFinite(val)) return "#e8e4d8";
+  const green = [46, 106, 59];
+  const white = [250, 248, 243];
+  const red   = [181, 56, 31];
+  let r, g, b;
+  if (val <= 0.5) {
+    const t = val / 0.5;
+    r = Math.round(red[0] + (white[0] - red[0]) * t);
+    g = Math.round(red[1] + (white[1] - red[1]) * t);
+    b = Math.round(red[2] + (white[2] - red[2]) * t);
+  } else {
+    const t = (val - 0.5) / 0.5;
+    r = Math.round(white[0] + (green[0] - white[0]) * t);
+    g = Math.round(white[1] + (green[1] - white[1]) * t);
+    b = Math.round(white[2] + (green[2] - white[2]) * t);
+  }
+  return "rgb(" + r + "," + g + "," + b + ")";
+}
+
+function aucTextColor(val) {
+  if (val == null || !isFinite(val)) return "#8a8780";
+  if (val < 0.2 || val > 0.8) return "#faf8f3";
+  return "#0e0e0e";
+}
+
+/* Walk back from the latest history row to the first day of the
+   current regime run. Returns { day, since }. */
+function regimeContext(today, historyRows) {
+  if (!historyRows || !historyRows.length) return { day: 1, since: today.date };
+  let i = historyRows.length - 1;
+  while (i > 0 && historyRows[i - 1].regime === today.regime) i--;
+  return {
+    day: historyRows.length - i,
+    since: historyRows[i].date,
+  };
+}
+
+/* ── Renderers ─────────────────────────────────────────────── */
+
+function renderMasthead() {
+  const gen = STATE.manifest && STATE.manifest.ok && STATE.manifest.data.generated_at;
+  const latest = STATE.today && STATE.today.ok && STATE.today.data.date;
+  const now = new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  const parts = [];
+  if (gen) parts.push("snapshot " + String(gen).slice(0, 16).replace("T", " "));
+  if (latest) parts.push("data " + latest);
+  parts.push("now " + now);
+  document.getElementById("masthead-date").textContent = parts.join(" · ");
+}
+
+function renderSummaryStrip() {
+  const strip = document.getElementById("summary-strip");
+  if (!STATE.today || !STATE.today.ok) {
+    strip.textContent = "today · fetch failed";
+    return;
+  }
+  const t = STATE.today.data;
+  const history = STATE.history && STATE.history.ok ? STATE.history.data.rows : [];
+  const prev = history.length >= 2 ? history[history.length - 2] : null;
+  const prevPct = prev && prev.percentile != null ? prev.percentile : null;
+  const pctDelta = prevPct !== null ? t.percentile - prevPct : null;
+  const ctx = regimeContext(t, history);
+
+  strip.innerHTML =
+    `<span class="v">Long ${Math.round(t.position * 100)}%</span>` +
+    `<span class="sep">·</span>Regime ${t.regime}, day ${ctx.day}` +
+    `<span class="sep">·</span>Percentile ${fmtPct(t.percentile)}` +
+    `<span class="sep">·</span>Δ ${fmtSigned(pctDelta)}`;
+}
+
+function renderHero() {
+  if (!STATE.today || !STATE.today.ok) {
+    setPanelError("hero", "/today failed · " +
+      (STATE.today && STATE.today.error ? STATE.today.error.message : "no data"));
+    return;
+  }
+  const t = STATE.today.data;
+  const history = STATE.history && STATE.history.ok ? STATE.history.data.rows : [];
+  const prev = history.length >= 2 ? history[history.length - 2] : null;
+  const prevPct = prev && prev.percentile != null ? prev.percentile : null;
+  const position_prev = prev && prev.position != null ? prev.position : t.position;
+
+  const pctDelta = prevPct !== null ? t.percentile - prevPct : null;
+  const pctDeltaStr = fmtSigned(pctDelta);
+  const deltaClass = pctDelta == null ? "" : (pctDelta > 0 ? "bear" : pctDelta < 0 ? "bull" : "");
+
+  const posDelta = t.position - position_prev;
+  const posDeltaStr = fmtSigned(posDelta);
+
+  const ctx = regimeContext(t, history);
+
+  const hero = document.getElementById("hero");
+  hero.className = "hero";
+  hero.innerHTML = `
+    <div class="metric">
+      <div class="label">Percentile</div>
+      <div class="value">${fmtPct(t.percentile)}</div>
+      <div class="annot">Today's drawdown-risk vs past</div>
+    </div>
+    <div class="metric">
+      <div class="label">Change</div>
+      <div class="value ${deltaClass}">${pctDeltaStr}</div>
+      <div class="annot">Change vs yesterday<br/>
+        Percentile <span class="mono">${fmtPct(prevPct)}</span>
+        → <span class="mono">${fmtPct(t.percentile)}</span></div>
+    </div>
+    <div class="metric">
+      <div class="label">Regime</div>
+      <div class="value has-pill"><span class="regime-pill regime-${t.regime}">${t.regime}</span></div>
+      <div class="annot">Day <span class="mono">${ctx.day}</span>
+        <span class="sep">·</span>Since <span class="mono">${ctx.since}</span><br/>
+        Applying ${t.regime}-regime weight set</div>
+    </div>
+    <div class="metric">
+      <div class="label">Current position (long only)</div>
+      <div class="value">${Math.round(t.position * 100)}%</div>
+      <div class="annot">Target long BTC weight<br/>
+        <span class="mono">${posDeltaStr}</span> from
+        <span class="mono">${fmtPct(position_prev)}</span> prior session</div>
+    </div>
+  `;
+}
+
+function renderDriversTable() {
+  if (!STATE.today || !STATE.today.ok) {
+    setPanelError("drivers-table", "/today failed");
+    return;
+  }
+  if (!STATE.weights || !STATE.weights.ok) {
+    setPanelError("drivers-table", "/weights failed");
+    return;
+  }
+  const t = STATE.today.data;
+  const regimeRow = STATE.weights.data.rows.find(r =>
+    r.variant === "wf365_y_60" && r.regime === t.regime);
+  if (!regimeRow) {
+    setPanelError("drivers-table", "no wf365_y_60 weights row for regime=" + t.regime);
+    return;
+  }
+
+  const rows = HYPS.map(h => {
+    const score = t[h.col + "_score"];
+    const weight = regimeRow[h.col];
+    return { ...h, score, weight, contrib: (score || 0) * (weight || 0) };
+  }).sort((a, b) => b.contrib - a.contrib);
+
+  const maxContrib = Math.max(0.25, ...rows.map(r => r.contrib));
+
+  const div = document.getElementById("drivers-table");
+  div.className = "";  /* drop .placeholder */
+  div.innerHTML = `
+    <table class="drivers">
+      <colgroup>
+        <col class="col-name">
+        <col class="col-score">
+        <col class="col-weight">
+        <col class="col-contrib">
+        <col class="col-bar">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Hypothesis</th>
+          <th>Score</th>
+          <th>Weight</th>
+          <th>Contribution</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr>
+            <td><span class="swatch" style="background:${r.color}"></span>${r.name}</td>
+            <td>${fmtPct(r.score)}</td>
+            <td>${fmtPct(r.weight)}</td>
+            <td class="contrib">${fmtPct(r.contrib)}</td>
+            <td class="bar-cell"><div class="bar"
+              style="width:${(r.contrib / maxContrib * 100).toFixed(1)}%;
+                     background:${r.color}"></div></td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+
+  document.getElementById("drivers-meta").textContent =
+    `${t.regime} weight set · ensemble ${fmtPct(t.ensemble_score, 3)}`;
+}
+
+function renderFlagsPanel() {
+  const metaEl = document.getElementById("flags-meta");
+  const panel = document.getElementById("flags-panel");
+
+  if (!STATE.flags || !STATE.flags.ok) {
+    const status = STATE.flags && STATE.flags.error
+      ? (STATE.flags.error.status || "net") : "?";
+    panel.className = "placeholder";
+    panel.textContent = "drift monitor not yet run · /flags returned " + status;
+    metaEl.textContent = "unavailable";
+    return;
+  }
+
+  const rows = STATE.flags.data.rows || [];
+  metaEl.textContent = rows.length === 0
+    ? "no signals flagged"
+    : rows.length + " flagged · threshold AUC ≤ 0.50 or IS-OOS delta > 0.15";
+
+  if (rows.length === 0) {
+    panel.className = "";
+    panel.innerHTML = `<div class="flags-empty">
+      all ${STATE.health && STATE.health.ok ? STATE.health.data.count || "42" : "42"} signals within health-check thresholds · last refit 2026-05-01</div>`;
+    return;
+  }
+
+  panel.className = "";
+  panel.innerHTML = `
+    <table class="flags">
+      <thead>
+        <tr>
+          <th>Signal</th>
+          <th>Hypothesis</th>
+          <th>Level</th>
+          <th class="num">OOS AUC</th>
+          <th class="num">IS AUC</th>
+          <th class="num">Δ (IS−OOS)</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => {
+          const color = HYP_COLORS[r.hypothesis] || "var(--rule)";
+          const levelClass = r.level === "composite" ? "level-composite" : "";
+          const sig = String(r.signal).replace(/^sub_/, "").replace(/_score$/, "");
+          return `
+            <tr>
+              <td><span class="swatch" style="background:${color}"></span>${sig}</td>
+              <td>${HYP_SHORT_LABELS[r.hypothesis] || r.hypothesis}</td>
+              <td class="${levelClass}">${r.level}</td>
+              <td class="num">${fmtPct(r.oos_auc, 3)}</td>
+              <td class="num">${fmtPct(r.is_auc, 3)}</td>
+              <td class="num">${fmtSigned(r.delta_is_oos, 3)}</td>
+              <td class="reason">${r.reason || ""}</td>
+            </tr>`;
+        }).join("")}
+      </tbody>
+    </table>`;
+}
+
+function renderAucHeatmap() {
+  const panel = document.getElementById("auc-grid");
+  const range = chartRanges.auc;
+
+  /* Collect the label stream from /history (y_60 is the canonical target
+     for wf365). y_60 is null for the last ~60 days since the forward
+     window hasn't closed — those rows are silently dropped by
+     computeAUC's filter. */
+  if (!STATE.history || !STATE.history.ok) {
+    panel.className = "placeholder error";
+    panel.textContent = "history not loaded · cannot compute AUC";
+    return;
+  }
+  const histRows = STATE.history.data.rows || [];
+  const labelByDate = new Map();
+  for (const r of histRows) {
+    const l = r.y_60;
+    if (l === 0 || l === 1) labelByDate.set(r.date, l);
+  }
+
+  /* Window cutoff: range is based on the MOST RECENT date that has a
+     valid label. Otherwise "1Y" would always include the last 60 days
+     of label-free rows and underestimate sample size. */
+  const labeledDates = [...labelByDate.keys()].sort();
+  if (!labeledDates.length) {
+    panel.className = "placeholder error";
+    panel.textContent = "no labeled history (y_60 all null)";
+    return;
+  }
+  const labelCutoff = labeledDates[labeledDates.length - 1];
+  const cutoff = range === "all" ? "1900-01-01"
+    : daysAgoIso(range === "3y" ? 1095 : 365, labelCutoff);
+
+  /* Update meta. */
+  const rangeLabel = range === "1y" ? "trailing 365 labeled days"
+    : range === "3y" ? "trailing 3 labeled years"
+    : "all available labeled data";
+  const metaEl = document.getElementById("auc-meta");
+  if (metaEl) {
+    metaEl.textContent =
+      `AUC over ${rangeLabel} · ${cutoff} → ${labelCutoff} · 0.50 = random · higher = more predictive`;
+  }
+
+  /* Hypothesis order + keys in STATE for each. */
+  const HYPS_ORDER = [
+    { id: "macro_equities",     key: "hyp_me" },
+    { id: "cme",                key: "hyp_cm" },
+    { id: "crypto_derivatives", key: "hyp_cd" },
+    { id: "classic_cycle",      key: "hyp_cc" },
+    { id: "etf_flows",          key: "hyp_ef" },
+    { id: "eth",                key: "hyp_et" },
+  ];
+
+  const legend = `
+    <div class="auc-legend">
+      <div><span class="swatch"></span>0.0 → 0.50 → 1.0</div>
+      <div>Main number = AUC over the selected window</div>
+      <div>Lower number = n valid pairs (signal non-null AND y_60 non-null AND within window)</div>
+    </div>`;
+
+  const groupHtml = HYPS_ORDER.map(({ id, key }) => {
+    if (!STATE[key] || !STATE[key].ok) return "";
+    const rows = STATE[key].data.rows || [];
+    if (!rows.length) return "";
+
+    /* Sub-signal columns are prefixed "sub_". */
+    const sample = rows[rows.length - 1];
+    const subKeys = Object.keys(sample).filter(c => c.startsWith("sub_"));
+    if (!subKeys.length) return "";
+
+    /* For each sub-signal, pair windowed values with y_60 labels. */
+    const items = subKeys.map(sk => {
+      const pairs = [];
+      for (const r of rows) {
+        if (r.date < cutoff) continue;
+        const l = labelByDate.get(r.date);
+        if (l === undefined) continue;
+        pairs.push({ v: r[sk], l });
+      }
+      const { auc, n } = computeAUC(pairs);
+      const sigName = sk.replace(/^sub_/, "").replace(/_rank$/, "").replace(/_/g, " ");
+      return { signal: sigName, auc, n };
+    });
+
+    const isRef = id === "eth";
+    const label = HYP_SHORT_LABELS[id] || id;
+    const labelClass = isRef ? "heatmap-group-label reference" : "heatmap-group-label";
+    return `
+      <div class="heatmap-group">
+        <div class="${labelClass}">${label}</div>
+        <div class="heatmap-cells">
+          ${items.map(it => {
+            const bg = aucColor(it.auc);
+            const fg = aucTextColor(it.auc);
+            const aucStr = it.auc == null ? "—" : fmtPct(it.auc);
+            return `
+              <div class="heatmap-cell" style="background:${bg}; color:${fg}">
+                <div class="cell-name" style="color:${fg}; opacity:0.8">${it.signal}</div>
+                <div class="cell-val">${aucStr}</div>
+                <div class="cell-is" style="color:${fg}">n=${it.n}</div>
+              </div>`;
+          }).join("")}
+        </div>
+      </div>`;
+  }).join("");
+
+  panel.className = "";
+  panel.innerHTML = legend + groupHtml;
+}
+
+function renderPipelineFooter() {
+  const feedsEl = document.getElementById("pipeline-feeds");
+  const metaEl  = document.getElementById("pipeline-meta");
+
+  /* Feeds — derive from /data_inventory groups; freshness from max(end)
+     vs model latest_date. */
+  const latest = STATE.today && STATE.today.ok ? STATE.today.data.date : null;
+  const invRows = (STATE.data_inventory && STATE.data_inventory.ok)
+    ? STATE.data_inventory.data.rows : [];
+
+  if (invRows.length) {
+    const groups = {};
+    const latestStr = latest || "";
+    invRows.forEach(r => {
+      /* Ignore rows whose `end` isn't a real past date — data_inventory
+         includes dimension counts (e.g., etf_detail end="19") and
+         projected/future dates (e.g., rainbow_chart end="2026-12-19"). */
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(r.end)) return;
+      if (latestStr && r.end > latestStr) return;
+      const g = r.group;
+      if (!(g in groups) || r.end > groups[g]) groups[g] = r.end;
+    });
+    const latestMs = latest ? Date.parse(latest) : Date.now();
+    const feedHtml = Object.entries(groups).sort().map(([g, end]) => {
+      const staleDays = Math.max(0, Math.round((latestMs - Date.parse(end)) / 86400000));
+      const ok = staleDays <= 7;
+      return `<div class="feed"><span class="name">${g}</span>` +
+             `<span class="status ${ok ? "ok" : "warn"}">${ok ? "✓" : "⚠"}</span>` +
+             `<span>${staleDays}d</span></div>`;
+    }).join("");
+    feedsEl.innerHTML = feedHtml || `<div class="feed"><span class="name">feeds</span>` +
+                                   `<span class="status warn">no dated rows</span></div>`;
+  } else {
+    feedsEl.innerHTML = `<div class="feed"><span class="name">feeds</span>` +
+                       `<span class="status warn">—</span></div>`;
+  }
+
+  const gen = STATE.manifest && STATE.manifest.ok ? STATE.manifest.data.generated_at : null;
+  const pieces = [];
+  if (gen) pieces.push("snapshot " + String(gen).slice(0, 19).replace("T", " "));
+  if (latest) pieces.push("data through " + latest);
+  if (STATE.history && STATE.history.ok) pieces.push(STATE.history.data.count + " rows");
+  metaEl.textContent = pieces.join(" · ");
+}
+
+/* ── Phase 3 fallback for panels without a renderer yet ────── */
+
+function renderFallbackStatus() {
+  ENDPOINTS.forEach(ep => {
+    if (!ep.panelId) return;
+    const el = document.getElementById(ep.panelId);
+    if (!el) return;
+    /* If the panel was already rendered in Phase 4, skip it. */
+    if (!el.classList.contains("placeholder")) return;
+    const s = STATE[ep.key];
+    if (!s) return;
+    el.classList.remove("error");
+    if (s.ok) {
+      const n = rowCount(s.data);
+      const suffix = n === null ? "loaded" : n + " rows";
+      el.textContent = "✓ " + ep.path + " · " + suffix + " · awaiting Phase 5 render";
+    } else {
+      el.classList.add("error");
+      const st = s.error && s.error.status ? " · status=" + s.error.status : "";
+      const msg = s.error && s.error.message ? " · " + s.error.message : "";
+      el.textContent = "✕ " + ep.path + st + msg;
+    }
+  });
+}
+
+/* ── Chart primitives (ported from the mock) ───────────────── */
+
+const REGIME_BG_ALPHA = 0.10;
+
+function cssvar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+let REGIME_COLOR = null;  /* populated after DOM ready */
+
+function parseDateMs(s) { return new Date(s + "T00:00:00Z").getTime(); }
+
+function daysAgoIso(n, lastDate) {
+  const t = parseDateMs(lastDate) - n * 86400000;
+  return new Date(t).toISOString().slice(0, 10);
+}
+
+function filterRangeSeries(series, range) {
+  if (!series.length || range === "all") return series;
+  const days = range === "3y" ? 1095 : 365;
+  const cutoff = daysAgoIso(days, series[series.length - 1].d);
+  return series.filter(p => p.d >= cutoff);
+}
+
+function filterRegimesRange(segs, range, lastDate) {
+  if (range === "all") return segs;
+  const days = range === "3y" ? 1095 : 365;
+  const cutoff = daysAgoIso(days, lastDate);
+  const out = [];
+  for (const s of segs) {
+    const end = String(s.end).slice(0, 10);
+    const start = String(s.start).slice(0, 10);
+    if (end < cutoff) continue;
+    out.push({ regime: s.regime, start: start < cutoff ? cutoff : start, end });
+  }
+  return out;
+}
+
+function buildScaleX(dates, x0, x1) {
+  const t0 = parseDateMs(dates[0]);
+  const t1 = parseDateMs(dates[dates.length - 1]);
+  const span = (t1 - t0) || 1;
+  return (t) => x0 + (parseDateMs(t) - t0) / span * (x1 - x0);
+}
+
+function buildScaleY(y0, y1, vmin, vmax) {
+  const span = (vmax - vmin) || 1;
+  return (v) => y1 - (v - vmin) / span * (y1 - y0);
+}
+
+function linePath(series, accessor, scaleX, scaleY) {
+  let d = "", started = false;
+  for (const p of series) {
+    const v = accessor(p);
+    if (v == null || isNaN(v)) { started = false; continue; }
+    const x = scaleX(p.d), y = scaleY(v);
+    if (!isFinite(x) || !isFinite(y)) { started = false; continue; }
+    d += (started ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1);
+    started = true;
+  }
+  return d;
+}
+
+function regimeBandsSvg(segs, scaleX, y0, y1, alpha) {
+  alpha = alpha == null ? REGIME_BG_ALPHA : alpha;
+  return segs.map(s => {
+    const x1 = scaleX(String(s.start).slice(0, 10));
+    const x2 = scaleX(String(s.end).slice(0, 10));
+    const col = REGIME_COLOR[s.regime] || "transparent";
+    return `<rect x="${x1.toFixed(1)}" y="${y0}" width="${(x2 - x1).toFixed(1)}" height="${y1 - y0}" fill="${col}" opacity="${alpha}"/>`;
+  }).join("");
+}
+
+function timeTicksSvg(scaleX, y, dates, range) {
+  const out = [], seen = new Set();
+  if (range === "1y" || dates.length < 500) {
+    for (const d of dates) {
+      const dt = new Date(d + "T00:00:00Z");
+      if (dt.getUTCDate() !== 1) continue;
+      const key = dt.getUTCFullYear() + "-" + dt.getUTCMonth();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const x = scaleX(d);
+      const label = dt.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" }).toUpperCase();
+      const yearLabel = dt.getUTCMonth() === 0 ? " " + dt.getUTCFullYear() : "";
+      out.push(`<line x1="${x.toFixed(1)}" y1="${y-3}" x2="${x.toFixed(1)}" y2="${y}" stroke="#8a8780" stroke-width="0.5"/>`);
+      out.push(`<text x="${x.toFixed(1)}" y="${y+12}" fill="#545450" font-size="9.5" font-weight="500" text-anchor="middle" letter-spacing="0.05em">${label}${yearLabel}</text>`);
+    }
+  } else {
+    for (const d of dates) {
+      const dt = new Date(d + "T00:00:00Z");
+      const isJan = dt.getUTCMonth() === 0 && dt.getUTCDate() === 1;
+      const isJul = dt.getUTCMonth() === 6 && dt.getUTCDate() === 1;
+      if (!isJan && !isJul) continue;
+      const key = dt.getUTCFullYear() + "-" + dt.getUTCMonth();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const x = scaleX(d);
+      const label = isJan ? String(dt.getUTCFullYear()) : "JUL";
+      out.push(`<line x1="${x.toFixed(1)}" y1="${y-3}" x2="${x.toFixed(1)}" y2="${y}" stroke="#8a8780" stroke-width="${isJan?0.8:0.4}"/>`);
+      out.push(`<text x="${x.toFixed(1)}" y="${y+12}" fill="${isJan?'#0e0e0e':'#8a8780'}" font-size="${isJan?10:9}" font-weight="${isJan?600:400}" text-anchor="middle" letter-spacing="0.05em">${label}</text>`);
+    }
+  }
+  return out.join("");
+}
+
+function smaArray(arr, window) {
+  const out = new Array(arr.length);
+  let sum = 0, n = 0;
+  const buf = [];
+  for (let i = 0; i < arr.length; i++) {
+    const v = arr[i];
+    if (v == null || isNaN(v)) buf.push(null);
+    else { buf.push(v); sum += v; n++; }
+    if (buf.length > window) {
+      const dropped = buf.shift();
+      if (dropped != null) { sum -= dropped; n--; }
+    }
+    out[i] = (n >= Math.floor(window * 0.7)) ? sum / n : null;
+  }
+  return out;
+}
+
+function attachSma(series, accessor, window, key) {
+  const vals = series.map(accessor);
+  const smoothed = smaArray(vals, window);
+  return series.map((p, i) => Object.assign({}, p, { [key]: smoothed[i] }));
+}
+
+/* Client-side AUC. Pairs = [{v: signal_value, l: binary_label}, ...].
+   Uses the Mann-Whitney U form with tie-correction: AUC = P(value | label=1
+   > value | label=0) for random (pos, neg) draws. Returns {auc, n_valid,
+   n_pos}. Returns auc=null if there aren't enough valid pairs or if
+   labels are all one class. */
+function computeAUC(pairs) {
+  const valid = pairs.filter(p =>
+    p.v != null && p.l != null && !isNaN(p.v) && isFinite(p.v) && (p.l === 0 || p.l === 1));
+  if (valid.length < 20) return { auc: null, n: valid.length, nPos: 0 };
+  const nPos = valid.filter(p => p.l === 1).length;
+  const nNeg = valid.length - nPos;
+  if (nPos === 0 || nNeg === 0) return { auc: null, n: valid.length, nPos };
+  /* Sort ascending by signal value; walk through tie groups averaging ranks. */
+  valid.sort((a, b) => a.v - b.v);
+  let rankSumPos = 0;
+  let i = 0;
+  while (i < valid.length) {
+    let j = i;
+    while (j < valid.length && valid[j].v === valid[i].v) j++;
+    const rankAvg = (i + j + 1) / 2;  /* ranks are 1-indexed */
+    for (let k = i; k < j; k++) {
+      if (valid[k].l === 1) rankSumPos += rankAvg;
+    }
+    i = j;
+  }
+  const auc = (rankSumPos - nPos * (nPos + 1) / 2) / (nPos * nNeg);
+  return { auc, n: valid.length, nPos };
+}
+
+/* Color interpolation for the signal risk heatmap — same scheme as the mock. */
+function heatmapColor(val) {
+  if (val == null || !isFinite(val)) return "#e8e4d8";
+  const green = [46, 106, 59], white = [250, 248, 243], red = [181, 56, 31];
+  let r, g, b;
+  if (val <= 0.5) {
+    const t = val / 0.5;
+    r = Math.round(green[0] + (white[0] - green[0]) * t);
+    g = Math.round(green[1] + (white[1] - green[1]) * t);
+    b = Math.round(green[2] + (white[2] - green[2]) * t);
+  } else {
+    const t = (val - 0.5) / 0.5;
+    r = Math.round(white[0] + (red[0] - white[0]) * t);
+    g = Math.round(white[1] + (red[1] - white[1]) * t);
+    b = Math.round(white[2] + (red[2] - white[2]) * t);
+  }
+  return "rgb(" + r + "," + g + "," + b + ")";
+}
+
+function heatmapTextColor(val) {
+  if (val == null || !isFinite(val)) return "#8a8780";
+  if (val < 0.15 || val > 0.85) return "#faf8f3";
+  return "#0e0e0e";
+}
+
+/* ── Data transforms ───────────────────────────────────────── */
+
+/* Transform /history rows into the chart-helpers shape. Reconstructs
+   an indexed BTC series from cumprod of btc_return (starting at 1.00),
+   so the chart shows relative price; absolute USD would need /raw. */
+function buildChartSeries() {
+  const rows = STATE.history && STATE.history.ok ? STATE.history.data.rows : [];
+  if (!rows.length) return { series: [], segs: [], lastDate: null };
+
+  let btcIdx = 1.0;
+  const series = rows.map(r => {
+    if (r.btc_return != null && isFinite(r.btc_return)) btcIdx *= (1 + r.btc_return);
+    return {
+      d: r.date,
+      btc: btcIdx,
+      pct: r.percentile,
+      pos: r.position,
+      reg: r.regime,
+      ens: r.ensemble_score,
+      me: r.macro_equities_score,
+      cm: r.cme_score,
+      cd: r.crypto_derivatives_score,
+      cc: r.classic_cycle_score,
+      ef: r.etf_flows_score,
+      et: r.eth_score,
+      btc_return: r.btc_return,
+      strategy_return: r.strategy_return,
+    };
+  });
+
+  const segs = [];
+  let cur = null;
+  for (const p of series) {
+    if (!cur || cur.regime !== p.reg) {
+      if (cur) segs.push(cur);
+      cur = { regime: p.reg, start: p.d, end: p.d };
+    } else {
+      cur.end = p.d;
+    }
+  }
+  if (cur) segs.push(cur);
+
+  return { series, segs, lastDate: series[series.length - 1].d };
+}
+
+/* The canonical fit window is 2021-06-30 → today per common.ENSEMBLE_FIT_START.
+   `strategy_return` carries pre-calibration values back to 2015 in the raw
+   master but those don't represent the live walk-forward model. The start
+   date is authoritatively published in /manifest.canonical_start; we fall
+   back to 2021-06-30 if the field is absent (older manifests). */
+function canonicalStart() {
+  const m = STATE.manifest && STATE.manifest.ok && STATE.manifest.data;
+  if (m && m.canonical_start) return m.canonical_start;
+  return "2021-06-30";
+}
+
+/* Sharpe / total / max-drawdown over a window of daily returns, filtered
+   to the canonical fit window. */
+function computePerf(rows) {
+  const cutoff = canonicalStart();
+  const canonical = rows.filter(r => r.d >= cutoff && r.strategy_return != null);
+  const strat = canonical.map(r => r.strategy_return);
+  const bh    = canonical.map(r => r.btc_return != null ? r.btc_return : 0);
+  function stats(rets) {
+    if (!rets.length) return { sharpe: 0, total: 0, mdd: 0, days: 0 };
+    let cum = 1, peak = 1, mdd = 0, sum = 0;
+    for (const r of rets) {
+      cum *= (1 + r);
+      sum += r;
+      if (cum > peak) peak = cum;
+      const dd = (cum - peak) / peak;
+      if (dd < mdd) mdd = dd;
+    }
+    const mean = sum / rets.length;
+    let varSum = 0;
+    for (const r of rets) varSum += (r - mean) * (r - mean);
+    const sd = Math.sqrt(varSum / rets.length);
+    const sharpe = sd > 0 ? (mean / sd) * Math.sqrt(365) : 0;
+    return { sharpe, total: cum - 1, mdd, days: rets.length };
+  }
+  const s = stats(strat), b = stats(bh);
+  return {
+    strat_sharpe: s.sharpe, bh_sharpe: b.sharpe,
+    strat_total:  s.total,  bh_total:  b.total,
+    strat_mdd:    s.mdd,    bh_mdd:    b.mdd,
+    days: s.days,
+  };
+}
+
+/* ── Global chart state ────────────────────────────────────── */
+
+let CHART_DATA = { series: [], segs: [], lastDate: null };
+const chartRanges = { btc: "1y", pctTop: "1y", tr: "1y", state: "1y" };
+
+/* Pull active threshold values from /thresholds for wf365_y_60 canonical. */
+function getThresholds() {
+  if (!STATE.thresholds || !STATE.thresholds.ok) return { longThr: 0.45, defThr: 0.80 };
+  const row = (STATE.thresholds.data.rows || []).find(r => r.variant === "y_60_wf365");
+  if (!row) return { longThr: 0.45, defThr: 0.80 };
+  return { longThr: Number(row.long_thr), defThr: Number(row.def_thr) };
+}
+
+/* ── Chart renderers ───────────────────────────────────────── */
+
+function renderBtcAndPosition() {
+  const range = chartRanges.btc;
+  const host = document.getElementById("chart-btc-pos");
+  if (!CHART_DATA.series.length) {
+    host.className = "placeholder error";
+    host.textContent = "chart-btc-pos · no /history data";
+    return;
+  }
+  const series = filterRangeSeries(CHART_DATA.series, range);
+  const segs = filterRegimesRange(CHART_DATA.segs, range, CHART_DATA.lastDate);
+
+  document.getElementById("btc-price-meta").textContent =
+    range === "1y" ? `trailing 365d · ${series[0].d} → ${series[series.length-1].d}`
+    : range === "3y" ? `trailing 3y · ${series[0].d} → ${series[series.length-1].d}`
+    : `full history · ${series[0].d} → ${series[series.length-1].d} · ${series.length}d`;
+
+  const W = 1280, H = 320, padL = 54, padR = 54, padT = 14, padB = 34;
+  const y0 = padT, y1 = H - padB;
+
+  const prices = series.map(p => p.btc).filter(v => v != null && v > 0);
+  const pMin = Math.min(...prices), pMax = Math.max(...prices);
+  const logMin = Math.log(pMin * 0.98), logMax = Math.log(pMax * 1.02);
+  const scaleX = buildScaleX(series.map(p => p.d), padL, W - padR);
+  const scaleYPrice = (p) => y1 - (Math.log(p) - logMin) / (logMax - logMin) * (y1 - y0);
+  const scaleYPos = buildScaleY(y0, y1, 0, 1);
+
+  const pricePath = linePath(series, p => p.btc, scaleX, scaleYPrice);
+  const posRawPath = linePath(series, p => p.pos, scaleX, scaleYPos);
+  const posSmoothed = attachSma(series, p => p.pos, 7, "pos7");
+  const posSmoothPath = linePath(posSmoothed, p => p.pos7, scaleX, scaleYPos);
+
+  /* Price y-axis ticks — indexed, so show relative levels like 0.5×, 1×, 2×. */
+  const ticks = [];
+  const span = pMax / pMin;
+  const stepMult = span > 8 ? 2 : (span > 3 ? 1.5 : 1.25);
+  for (let v = Math.pow(stepMult, Math.floor(Math.log(pMin)/Math.log(stepMult))); v <= pMax * 1.01; v *= stepMult) {
+    if (v >= pMin * 0.99) ticks.push(v);
+  }
+
+  host.className = "chart-block";
+  host.innerHTML = `
+    <div class="chart-caption">
+      <div class="title">BTC index (log, left) · position daily + 7d MA (right) · regime bands</div>
+      <div class="legend">
+        <div class="item"><div class="ln" style="background:var(--btc)"></div>BTC index</div>
+        <div class="item"><div class="ln" style="background:#c0bbad"></div>position daily</div>
+        <div class="item"><div class="ln" style="background:#0e0e0e"></div>position 7d MA</div>
+      </div>
+    </div>
+    <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      ${regimeBandsSvg(segs, scaleX, y0, y1, 0.07)}
+      ${ticks.map(t => {
+        const y = scaleYPrice(t);
+        return `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="#ebe6d8" stroke-width="0.5"/>
+                <text x="${padL-6}" y="${(y+3).toFixed(1)}" fill="var(--btc)" font-size="9.5" text-anchor="end" font-weight="500">${t < 1 ? t.toFixed(2) : t.toFixed(1)}×</text>`;
+      }).join("")}
+      ${[0, 0.25, 0.5, 0.75, 1.0].map(v => {
+        const y = scaleYPos(v);
+        return `<text x="${W-padR+6}" y="${(y+3).toFixed(1)}" fill="#545450" font-size="9.5" text-anchor="start">${(v*100).toFixed(0)}%</text>`;
+      }).join("")}
+      <path d="${pricePath}" fill="none" stroke="var(--btc)" stroke-width="1.2" stroke-linejoin="round"/>
+      <path d="${posRawPath}" fill="none" stroke="#c0bbad" stroke-width="0.75" opacity="0.65"/>
+      <path d="${posSmoothPath}" fill="none" stroke="#0e0e0e" stroke-width="1.5" stroke-linejoin="round"/>
+      ${timeTicksSvg(scaleX, y1 + 6, series.map(p => p.d), range)}
+    </svg>`;
+}
+
+function renderPercentileTop() {
+  const range = chartRanges.pctTop;
+  const host = document.getElementById("chart-pct-top");
+  if (!CHART_DATA.series.length) {
+    host.className = "placeholder error";
+    host.textContent = "chart-pct-top · no /history data";
+    return;
+  }
+  const series = filterRangeSeries(CHART_DATA.series, range);
+  const { longThr, defThr } = getThresholds();
+
+  document.getElementById("pct-top-meta").textContent =
+    `${series[0].d} → ${series[series.length-1].d} · thr ${longThr.toFixed(2)}/${defThr.toFixed(2)}`;
+
+  const W = 1280, H = 200, padL = 54, padR = 90, padT = 14, padB = 34;
+  const y0 = padT, y1 = H - padB;
+  const scaleX = buildScaleX(series.map(p => p.d), padL, W - padR);
+  const scaleY = buildScaleY(y0, y1, 0, 1);
+
+  const rawPath = linePath(series, p => p.pct, scaleX, scaleY);
+  const smoothed = attachSma(series, p => p.pct, 7, "pct7");
+  const smoothPath = linePath(smoothed, p => p.pct7, scaleX, scaleY);
+
+  host.className = "chart-block";
+  host.innerHTML = `
+    <div class="chart-caption">
+      <div class="title">Rolling-365d rank of ensemble score · position thresholds shaded</div>
+      <div class="legend">
+        <div class="item"><div class="ln" style="background:#c0bbad"></div>daily</div>
+        <div class="item"><div class="ln" style="background:#0e0e0e"></div>7d MA</div>
+        <div class="item"><div class="sq" style="background:var(--bull); opacity:0.4"></div>long ≤ ${longThr.toFixed(2)}</div>
+        <div class="item"><div class="sq" style="background:var(--bear); opacity:0.4"></div>defense ≥ ${defThr.toFixed(2)}</div>
+      </div>
+    </div>
+    <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <rect x="${padL}" y="${y0}" width="${W-padL-padR}" height="${(scaleY(defThr)-y0).toFixed(1)}" fill="var(--bear)" opacity="0.08"/>
+      <rect x="${padL}" y="${scaleY(longThr).toFixed(1)}" width="${W-padL-padR}" height="${(y1-scaleY(longThr)).toFixed(1)}" fill="var(--bull)" opacity="0.08"/>
+      <line x1="${padL}" y1="${scaleY(longThr).toFixed(1)}" x2="${W-padR}" y2="${scaleY(longThr).toFixed(1)}" stroke="var(--bull)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="${padL}" y1="${scaleY(defThr).toFixed(1)}" x2="${W-padR}" y2="${scaleY(defThr).toFixed(1)}" stroke="var(--bear)" stroke-width="1" stroke-dasharray="3,3"/>
+      <text x="${W-padR+6}" y="${(scaleY(longThr)+3).toFixed(1)}" fill="var(--bull)" font-size="9.5" font-weight="600" text-anchor="start">${longThr.toFixed(2)} LONG</text>
+      <text x="${W-padR+6}" y="${(scaleY(defThr)+3).toFixed(1)}" fill="var(--bear)" font-size="9.5" font-weight="600" text-anchor="start">${defThr.toFixed(2)} DEF</text>
+      ${[0, 0.25, 0.5, 0.75, 1.0].map(v => {
+        const y = scaleY(v);
+        return `<text x="${padL-6}" y="${(y+3).toFixed(1)}" fill="#545450" font-size="9.5" text-anchor="end">${v.toFixed(2)}</text>`;
+      }).join("")}
+      <path d="${rawPath}" fill="none" stroke="#c0bbad" stroke-width="0.75" opacity="0.55"/>
+      <path d="${smoothPath}" fill="none" stroke="#0e0e0e" stroke-width="1.5" stroke-linejoin="round"/>
+      ${timeTicksSvg(scaleX, y1 + 6, series.map(p => p.d), range)}
+    </svg>`;
+}
+
+function renderTrackRecord() {
+  const range = chartRanges.tr;
+  const chartHost = document.getElementById("chart-equity");
+  const tableHost = document.getElementById("perf-table");
+  if (!CHART_DATA.series.length) {
+    chartHost.className = "placeholder error";
+    chartHost.textContent = "chart-equity · no /history data";
+    tableHost.className = "placeholder error";
+    tableHost.textContent = "no /history data";
+    return;
+  }
+  const series = filterRangeSeries(CHART_DATA.series, range);
+  /* Canonical fit window: rebase from the first row at or after
+     /manifest.canonical_start (2021-06-30). Strategy returns exist back
+     to 2015 in the raw CSV but are pre-calibration. */
+  const cutoff = canonicalStart();
+  const canonical = series.filter(p => p.d >= cutoff && p.strategy_return != null);
+  let cumS = 1, cumB = 1;
+  const eq = canonical.map(p => {
+    if (p.strategy_return != null) cumS *= (1 + p.strategy_return);
+    if (p.btc_return != null)      cumB *= (1 + p.btc_return);
+    return { d: p.d, s: cumS, b: cumB };
+  });
+  const rebase = eq.length ? { s0: eq[0].s, b0: eq[0].b } : { s0: 1, b0: 1 };
+  const eqRe = eq.map(r => ({ d: r.d, s: r.s / rebase.s0, b: r.b / rebase.b0 }));
+
+  const perf = computePerf(series);
+
+  if (!eqRe.length) {
+    chartHost.className = "placeholder";
+    chartHost.textContent = "no canonical data in this window";
+    tableHost.className = "placeholder";
+    tableHost.textContent = "no canonical data in this window";
+    document.getElementById("perf-meta").textContent = "—";
+    return;
+  }
+
+  const fmtPctStr = v => (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
+  const fmtPp = v => (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "pp";
+  const fmtNum = v => v.toFixed(2);
+
+  const sharpeDelta = perf.strat_sharpe - perf.bh_sharpe;
+  const retDelta = perf.strat_total - perf.bh_total;
+  const ddDelta = perf.strat_mdd - perf.bh_mdd;
+
+  document.getElementById("perf-meta").textContent =
+    `${eq[0].d} → ${eq[eq.length-1].d} · ${perf.days} days`;
+
+  tableHost.className = "";
+  tableHost.innerHTML = `
+    <table class="perf">
+      <thead>
+        <tr><th></th><th>Strategy</th><th>Buy &amp; hold</th><th>Δ vs B&amp;H</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Sharpe (annualized)</td>
+          <td class="strat">${fmtNum(perf.strat_sharpe)}</td>
+          <td class="bh">${fmtNum(perf.bh_sharpe)}</td>
+          <td class="delta ${sharpeDelta >= 0 ? 'pos':'neg'}">${(sharpeDelta>=0?'+':'') + sharpeDelta.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td>Total return</td>
+          <td class="strat">${fmtPctStr(perf.strat_total)}</td>
+          <td class="bh">${fmtPctStr(perf.bh_total)}</td>
+          <td class="delta ${retDelta >= 0 ? 'pos':'neg'}">${fmtPp(retDelta)}</td>
+        </tr>
+        <tr>
+          <td>Max drawdown</td>
+          <td class="strat">${fmtPctStr(perf.strat_mdd)}</td>
+          <td class="bh">${fmtPctStr(perf.bh_mdd)}</td>
+          <td class="delta ${ddDelta >= 0 ? 'pos':'neg'}">${fmtPp(ddDelta)}</td>
+        </tr>
+        <tr>
+          <td>Days</td>
+          <td class="strat">${perf.days.toLocaleString()}</td>
+          <td class="bh">${perf.days.toLocaleString()}</td>
+          <td class="delta">—</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="perf-footer">
+      <div>No transaction cost · Daily rebalance to target position · Return = yesterday position × today BTC return</div>
+      <div class="mono">window: ${perf.days} days · rebased to 1.00</div>
+    </div>`;
+
+  /* Equity chart */
+  const W = 1280, H = 320, padL = 54, padR = 60, padT = 18, padB = 40;
+  const y0 = padT, y1 = H - padB;
+  const allVals = eqRe.flatMap(r => [r.s, r.b]).filter(v => v > 0);
+  const vMin = Math.min(...allVals), vMax = Math.max(...allVals);
+  const logMin = Math.log(vMin * 0.98), logMax = Math.log(vMax * 1.02);
+  const scaleX = buildScaleX(eqRe.map(r => r.d), padL, W - padR);
+  const scaleY = (v) => y1 - (Math.log(v) - logMin) / (logMax - logMin) * (y1 - y0);
+  const sPath = linePath(eqRe, r => r.s, scaleX, scaleY);
+  const bPath = linePath(eqRe, r => r.b, scaleX, scaleY);
+
+  /* ≥20% drawdown bands — shaded regions on the equity chart.
+   *
+   * Definition: a day is "in drawdown" if BTC is ≥20% below its TRAILING
+   * 60-DAY peak (not the all-time running max). 60 days matches the
+   * model's y_60 training horizon. Using a rolling peak instead of the
+   * cumulative peak means sustained bear markets appear as DISTINCT
+   * legs rather than one continuous block — e.g., the 2022 bear breaks
+   * into the initial Dec–Feb crash, the May–Aug Luna collapse, and
+   * the Oct–Jan FTX aftermath, with visible gaps during consolidation.
+   *
+   * Bands within 14 days of each other get merged so that 1-day blips
+   * don't visually fragment genuine episodes.
+   *
+   * Computed on the FULL fetched history (CHART_DATA.series) so bands
+   * are consistent across 1Y/3Y/ALL toggles; then clipped to the
+   * visible window for rendering. */
+  const DD_WINDOW = 60;     /* trailing days for peak */
+  const DD_THRESH = -0.20;  /* fraction below peak */
+  const DD_MERGE_GAP = 14;  /* max gap in days between bands to merge */
+
+  const fullSeries = CHART_DATA.series;
+  const rawBands = [];
+  {
+    let inDd = false, bandStart = null;
+    for (let i = 0; i < fullSeries.length; i++) {
+      const lo = Math.max(0, i - DD_WINDOW + 1);
+      let peakBH = -Infinity;
+      for (let k = lo; k <= i; k++) if (fullSeries[k].btc > peakBH) peakBH = fullSeries[k].btc;
+      const dd = peakBH > 0 ? (fullSeries[i].btc - peakBH) / peakBH : 0;
+      if (dd <= DD_THRESH && !inDd) {
+        inDd = true;
+        bandStart = fullSeries[i].d;
+      } else if (dd > DD_THRESH && inDd) {
+        inDd = false;
+        rawBands.push({ start: bandStart, end: fullSeries[i - 1].d });
+      }
+    }
+    if (inDd) rawBands.push({ start: bandStart, end: fullSeries[fullSeries.length - 1].d });
+  }
+  /* Merge adjacent bands with gap ≤ DD_MERGE_GAP days. */
+  const mergedBands = [];
+  for (const b of rawBands) {
+    if (!mergedBands.length) { mergedBands.push({ ...b }); continue; }
+    const prev = mergedBands[mergedBands.length - 1];
+    const gap = (parseDateMs(b.start) - parseDateMs(prev.end)) / 86400000 - 1;
+    if (gap <= DD_MERGE_GAP) prev.end = b.end;
+    else mergedBands.push({ ...b });
+  }
+  /* Clip to visible window. */
+  const visStart = eqRe.length ? eqRe[0].d : null;
+  const visEnd = eqRe.length ? eqRe[eqRe.length - 1].d : null;
+  const visibleBands = mergedBands.filter(b => b.end >= visStart && b.start <= visEnd)
+    .map(b => ({
+      start: b.start < visStart ? visStart : b.start,
+      end:   b.end   > visEnd   ? visEnd   : b.end,
+    }));
+  const ddRects = visibleBands.map(b => {
+    const x1 = scaleX(b.start);
+    const x2 = scaleX(b.end);
+    return `<rect x="${x1.toFixed(1)}" y="${y0}" width="${Math.max(1, x2 - x1).toFixed(1)}" height="${y1 - y0}" fill="var(--bear)" opacity="0.14"/>`;
+  }).join("");
+
+  const tickVals = [];
+  const span = vMax / vMin;
+  const step = span > 8 ? 2 : (span > 3 ? 1.5 : 1.25);
+  for (let v = Math.pow(step, Math.floor(Math.log(vMin)/Math.log(step))); v <= vMax * 1.01; v *= step) {
+    if (v >= vMin * 0.99) tickVals.push(v);
+  }
+
+  chartHost.className = "chart-block";
+  chartHost.innerHTML = `
+    <div class="chart-caption">
+      <div class="title">Equity curve — strategy vs buy &amp; hold (log, rebased to 1.00)</div>
+      <div class="legend">
+        <div class="item"><div class="ln" style="background:#0e0e0e"></div>strategy</div>
+        <div class="item"><div class="ln" style="background:var(--ink-softer)"></div>buy &amp; hold</div>
+        <div class="item"><div class="sq" style="background:var(--bear); opacity:0.4"></div>≥20% drawdown episode (from 60d peak)</div>
+      </div>
+    </div>
+    <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      ${ddRects}
+      ${tickVals.map(t => {
+        const y = scaleY(t);
+        return `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="#ebe6d8" stroke-width="0.5"/>
+                <text x="${padL-6}" y="${(y+3).toFixed(1)}" fill="#545450" font-size="9.5" text-anchor="end">${t < 1 ? t.toFixed(2) : (t < 10 ? t.toFixed(1) : t.toFixed(0))}×</text>`;
+      }).join("")}
+      <path d="${bPath}" fill="none" stroke="var(--ink-softer)" stroke-width="1.2" stroke-linejoin="round"/>
+      <path d="${sPath}" fill="none" stroke="#0e0e0e" stroke-width="1.6" stroke-linejoin="round"/>
+      ${timeTicksSvg(scaleX, y1 + 6, eqRe.map(r => r.d), range)}
+    </svg>`;
+}
+
+function renderPositionFunction() {
+  const host = document.getElementById("posfn-box");
+  if (!STATE.today || !STATE.today.ok) {
+    host.className = "placeholder error";
+    host.textContent = "posfn · /today failed";
+    return;
+  }
+  const { longThr, defThr } = getThresholds();
+  const t = STATE.today.data;
+  /* Full-width chart geometry matches other charts: 1280 × 280 viewBox with
+     padL/padR wide enough to label axes. */
+  const W = 1280, H = 280, padL = 60, padR = 60, padT = 18, padB = 40;
+  const x0 = padL, x1 = W - padR, y0 = padT, y1 = H - padB;
+  const sX = p => x0 + p * (x1 - x0);
+  const sY = p => y1 - p * (y1 - y0);
+  const curve = `M${sX(0).toFixed(1)},${sY(1).toFixed(1)} L${sX(longThr).toFixed(1)},${sY(1).toFixed(1)} L${sX(defThr).toFixed(1)},${sY(0).toFixed(1)} L${sX(1).toFixed(1)},${sY(0).toFixed(1)}`;
+  const tPct = Math.max(0, Math.min(1, t.percentile));
+  const tPos = Math.max(0, Math.min(1, t.position));
+  const tX = sX(tPct);
+  const tY = sY(tPos);
+  const accent = cssvar("--accent");
+
+  document.getElementById("posfn-meta").textContent =
+    `today: percentile ${t.percentile.toFixed(3)} → position ${t.position.toFixed(2)}`;
+
+  /* y-axis gridlines at 0, 0.25, 0.5, 0.75, 1.0. */
+  const yTicks = [0, 0.25, 0.5, 0.75, 1.0].map(v => {
+    const y = sY(v);
+    return `<line x1="${x0}" y1="${y.toFixed(1)}" x2="${x1}" y2="${y.toFixed(1)}" stroke="#ebe6d8" stroke-width="0.5"/>
+            <text x="${x0-6}" y="${(y+3).toFixed(1)}" fill="#545450" font-size="10" text-anchor="end">${v.toFixed(2)}</text>`;
+  }).join("");
+
+  /* x-axis ticks at 0, long_thr, 0.5 (if between), def_thr, 1.0. */
+  const xTickVals = [0, longThr, 0.5, defThr, 1.0].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b);
+  const xTicks = xTickVals.map(v => {
+    const x = sX(v);
+    const isThr = v === longThr || v === defThr;
+    const fill = v === longThr ? "var(--bull)" : (v === defThr ? "var(--bear)" : "#545450");
+    const weight = isThr ? 600 : 400;
+    return `<line x1="${x.toFixed(1)}" y1="${y1}" x2="${x.toFixed(1)}" y2="${(y1+4).toFixed(1)}" stroke="#8a8780" stroke-width="0.5"/>
+            <text x="${x.toFixed(1)}" y="${(y1+16).toFixed(1)}" fill="${fill}" font-size="10" font-weight="${weight}" text-anchor="middle">${v.toFixed(2)}</text>`;
+  }).join("");
+
+  host.className = "chart-block";
+  host.innerHTML = `
+    <div class="chart-caption">
+      <div class="title">Full long ≤ ${longThr.toFixed(2)} · full defense ≥ ${defThr.toFixed(2)} · linear between</div>
+      <div class="legend">
+        <div class="item"><div class="sq" style="background:var(--bull); opacity:0.4"></div>long zone</div>
+        <div class="item"><div class="sq" style="background:var(--bear); opacity:0.4"></div>defense zone</div>
+        <div class="item"><div class="ln" style="background:#0e0e0e"></div>taper curve</div>
+        <div class="item"><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${accent};"></span>today</div>
+      </div>
+    </div>
+    <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <rect x="${sX(0)}" y="${y0}" width="${sX(longThr)-sX(0)}" height="${y1-y0}" fill="var(--bull)" opacity="0.10"/>
+      <rect x="${sX(defThr)}" y="${y0}" width="${sX(1)-sX(defThr)}" height="${y1-y0}" fill="var(--bear)" opacity="0.10"/>
+      ${yTicks}
+      ${xTicks}
+      <line x1="${sX(longThr)}" y1="${y0}" x2="${sX(longThr)}" y2="${y1}" stroke="var(--bull)" stroke-width="1" stroke-dasharray="3,3"/>
+      <line x1="${sX(defThr)}" y1="${y0}" x2="${sX(defThr)}" y2="${y1}" stroke="var(--bear)" stroke-width="1" stroke-dasharray="3,3"/>
+      <path d="${curve}" fill="none" stroke="#0e0e0e" stroke-width="2" stroke-linejoin="round"/>
+      <line x1="${tX}" y1="${y1}" x2="${tX}" y2="${tY}" stroke="${accent}" stroke-width="1" stroke-dasharray="3,3" opacity="0.7"/>
+      <line x1="${x0}" y1="${tY}" x2="${tX}" y2="${tY}" stroke="${accent}" stroke-width="1" stroke-dasharray="3,3" opacity="0.7"/>
+      <circle cx="${tX}" cy="${tY}" r="6" fill="${accent}" stroke="var(--bg)" stroke-width="2"/>
+      <text x="${(tX+10).toFixed(1)}" y="${(tY-8).toFixed(1)}" fill="${accent}" font-size="11" font-weight="600" font-family="JetBrains Mono,monospace">pct ${t.percentile.toFixed(3)} → pos ${t.position.toFixed(2)}</text>
+    </svg>`;
+}
+
+function renderRegimeStrip() {
+  const range = chartRanges.state;
+  const host = document.getElementById("regime-strip");
+  if (!CHART_DATA.series.length) return;
+  const series = filterRangeSeries(CHART_DATA.series, range);
+  const segs = filterRegimesRange(CHART_DATA.segs, range, CHART_DATA.lastDate);
+  const W = 1280, H = 28, padL = 54, padR = 20;
+  const scaleX = buildScaleX(series.map(p => p.d), padL, W - padR);
+  const bandsHtml = segs.map(s => {
+    const x1 = scaleX(String(s.start).slice(0, 10));
+    const x2 = scaleX(String(s.end).slice(0, 10));
+    const w = x2 - x1;
+    const col = REGIME_COLOR[s.regime];
+    const midX = x1 + w / 2;
+    const isNeutral = s.regime === "neutral";
+    const textFill = isNeutral ? "#545450" : "#fdf8f2";
+    let label = "";
+    if (w > 55) {
+      label = `<text x="${midX.toFixed(1)}" y="17" fill="${textFill}" font-size="10" font-weight="700" text-anchor="middle" letter-spacing="0.15em" font-family="IBM Plex Sans,sans-serif">${s.regime.toUpperCase()}</text>`;
+    } else if (w > 20) {
+      label = `<text x="${midX.toFixed(1)}" y="17" fill="${textFill}" font-size="9" font-weight="700" text-anchor="middle" font-family="IBM Plex Sans,sans-serif">${s.regime[0].toUpperCase()}</text>`;
+    }
+    const attrs = isNeutral ? `fill="none" stroke="#c0bbad" stroke-width="1"` : `fill="${col}" opacity="0.85"`;
+    return `<rect x="${x1.toFixed(1)}" y="3" width="${w.toFixed(1)}" height="22" ${attrs}/>${label}`;
+  }).join("");
+  host.className = "regime-strip-wrap";
+  host.innerHTML = `
+    <div class="regime-strip-label">Regime history</div>
+    <svg class="regime-strip" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <text x="${padL-6}" y="18" fill="#545450" font-size="10" font-weight="500" text-anchor="end" font-family="IBM Plex Sans,sans-serif" letter-spacing="0.08em">REGIME</text>
+      ${bandsHtml}
+    </svg>`;
+}
+
+function renderPriceRegime() {
+  const range = chartRanges.state;
+  const host = document.getElementById("chart-price");
+  if (!CHART_DATA.series.length) return;
+  const series = filterRangeSeries(CHART_DATA.series, range);
+  const segs = filterRegimesRange(CHART_DATA.segs, range, CHART_DATA.lastDate);
+  document.getElementById("state-meta").textContent =
+    `${series[0].d} → ${series[series.length-1].d} · ${series.length}d`;
+
+  const W = 1280, H = 300, padL = 54, padR = 54, padT = 14, padB = 40;
+  const y0 = padT, y1 = H - padB;
+  const prices = series.map(p => p.btc).filter(v => v != null && v > 0);
+  const pMin = Math.min(...prices), pMax = Math.max(...prices);
+  const logMin = Math.log(pMin * 0.98), logMax = Math.log(pMax * 1.02);
+  const scaleX = buildScaleX(series.map(p => p.d), padL, W - padR);
+  const scaleY = (p) => y1 - (Math.log(p) - logMin) / (logMax - logMin) * (y1 - y0);
+  const pricePath = linePath(series, p => p.btc, scaleX, scaleY);
+
+  const tickVals = [];
+  const span = pMax / pMin;
+  const step = span > 8 ? 2 : (span > 3 ? 1.5 : 1.25);
+  for (let v = Math.pow(step, Math.floor(Math.log(pMin)/Math.log(step))); v <= pMax * 1.01; v *= step) {
+    if (v >= pMin * 0.99) tickVals.push(v);
+  }
+
+  host.className = "chart-block";
+  host.innerHTML = `
+    <div class="chart-caption">
+      <div class="title">BTC index &amp; regime (log scale)</div>
+      <div class="legend">
+        <div class="item"><div class="ln" style="background:#0e0e0e"></div>BTC</div>
+        <div class="item"><div class="sq" style="background:var(--bull); opacity:0.4"></div>bull</div>
+        <div class="item"><div class="sq" style="background:transparent; border:1px solid var(--rule)"></div>neutral</div>
+        <div class="item"><div class="sq" style="background:var(--bear); opacity:0.4"></div>bear</div>
+      </div>
+    </div>
+    <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      ${regimeBandsSvg(segs, scaleX, y0, y1, 0.12)}
+      ${tickVals.map(t => {
+        const y = scaleY(t);
+        return `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="#ebe6d8" stroke-width="0.5"/>
+                <text x="${padL-6}" y="${(y+3).toFixed(1)}" fill="#545450" font-size="9.5" text-anchor="end">${t < 1 ? t.toFixed(2) : (t < 10 ? t.toFixed(1) : t.toFixed(0))}×</text>`;
+      }).join("")}
+      <path d="${pricePath}" fill="none" stroke="#0e0e0e" stroke-width="1.3" stroke-linejoin="round"/>
+      ${timeTicksSvg(scaleX, y1 + 6, series.map(p => p.d), range)}
+    </svg>`;
+}
+
+/* Hypothesis composites over time — 5 lines + ETH as reference. */
+function renderHypothesisComposites() {
+  const range = chartRanges.state;
+  const host = document.getElementById("chart-explorer");
+  if (!CHART_DATA.series.length) return;
+  const series = filterRangeSeries(CHART_DATA.series, range);
+
+  const lines = [
+    { key: "me", name: "Macro & Equities",    color: "var(--h-me)", solid: true },
+    { key: "cm", name: "CME positioning",     color: "var(--h-cm)", solid: true },
+    { key: "cd", name: "Crypto Derivatives",  color: "var(--h-cd)", solid: true },
+    { key: "cc", name: "Classic Cycle",       color: "var(--h-cc)", solid: true },
+    { key: "ef", name: "ETF Flows",           color: "var(--h-ef)", solid: true },
+    { key: "et", name: "ETH (reference)",     color: "var(--h-et)", solid: false },
+  ];
+
+  const W = 1280, H = 320, padL = 54, padR = 170, padT = 14, padB = 34;
+  const y0 = padT, y1 = H - padB;
+  const scaleX = buildScaleX(series.map(p => p.d), padL, W - padR);
+  const scaleY = buildScaleY(y0, y1, 0, 1);
+
+  const paths = lines.map(ln => {
+    const smoothed = attachSma(series, p => p[ln.key], 7, ln.key + "7");
+    return {
+      ...ln,
+      d: linePath(smoothed, p => p[ln.key + "7"], scaleX, scaleY),
+    };
+  });
+
+  host.className = "chart-block";
+  host.innerHTML = `
+    <div class="chart-caption">
+      <div class="title">Hypothesis composite scores (7d MA) — higher = more drawdown risk</div>
+      <div class="legend"></div>
+    </div>
+    <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      ${[0, 0.25, 0.5, 0.75, 1.0].map(v => {
+        const y = scaleY(v);
+        return `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W-padR}" y2="${y.toFixed(1)}" stroke="#ebe6d8" stroke-width="0.5"/>
+                <text x="${padL-6}" y="${(y+3).toFixed(1)}" fill="#545450" font-size="9.5" text-anchor="end">${v.toFixed(2)}</text>`;
+      }).join("")}
+      ${paths.map(p => `<path d="${p.d}" fill="none" stroke="${p.color}" stroke-width="${p.solid?1.5:1.2}" stroke-dasharray="${p.solid?'':'3,3'}" stroke-linejoin="round" opacity="${p.solid?0.9:0.75}"/>`).join("")}
+      ${timeTicksSvg(scaleX, y1 + 6, series.map(p => p.d), range)}
+      ${paths.map((p, i) => {
+        const ly = padT + 12 + i * 18;
+        return `<line x1="${W-padR+10}" y1="${ly}" x2="${W-padR+34}" y2="${ly}" stroke="${p.color}" stroke-width="${p.solid?2:1.5}" stroke-dasharray="${p.solid?'':'3,3'}"/>
+                <text x="${W-padR+40}" y="${ly+3}" fill="#545450" font-size="10" font-family="IBM Plex Sans,sans-serif">${p.name}</text>`;
+      }).join("")}
+    </svg>`;
+}
+
+/* Signal risk heatmap — current value + window avg swatch per sub-signal. */
+function renderSignalHeatmap() {
+  const host = document.getElementById("heatmap-grid");
+  const HYP_KEYS = ["hyp_me", "hyp_cm", "hyp_cd", "hyp_cc", "hyp_ef"];
+  const HYP_NAMES = {
+    hyp_me: "Macro & Eq", hyp_cm: "CME", hyp_cd: "Crypto Deriv",
+    hyp_cc: "Classic Cycle", hyp_ef: "ETF Flows",
+  };
+  const available = HYP_KEYS.filter(k => STATE[k] && STATE[k].ok);
+  if (!available.length) {
+    host.className = "placeholder error";
+    host.textContent = "signal heatmap · /hypothesis/* not available";
+    return;
+  }
+
+  let html = "";
+  for (const k of HYP_KEYS) {
+    if (!STATE[k] || !STATE[k].ok) continue;
+    const rows = STATE[k].data.rows || [];
+    if (!rows.length) continue;
+    /* Sub-signal columns start with "sub_". */
+    const sample = rows[rows.length - 1];
+    const subKeys = Object.keys(sample).filter(c => c.startsWith("sub_"));
+    if (!subKeys.length) continue;
+
+    const items = subKeys.map(sk => {
+      const col = rows.map(r => r[sk]);
+      const smoothed = smaArray(col, 7);
+      /* Window = last 365 rows for "current" and average. */
+      const windowStart = Math.max(0, smoothed.length - 365);
+      const windowVals = smoothed.slice(windowStart).filter(v => v != null);
+      const current = windowVals.length ? windowVals[windowVals.length - 1] : null;
+      const avg = windowVals.length ? windowVals.reduce((a, b) => a + b, 0) / windowVals.length : null;
+      return {
+        key: sk,
+        label: sk.replace(/^sub_/, "").replace(/_rank$/, "").replace(/_/g, " "),
+        current, avg,
+      };
+    }).filter(it => it.current != null);
+
+    html += `<div class="heatmap-group">
+      <div class="heatmap-group-label">${HYP_NAMES[k]}</div>
+      <div class="heatmap-cells">
+        ${items.map(it => {
+          const bg = heatmapColor(it.current), fg = heatmapTextColor(it.current);
+          const avgBg = heatmapColor(it.avg);
+          return `<div class="heatmap-cell" style="background:${bg}; color:${fg}">
+            <div class="cell-name" style="color:${fg}; opacity:0.8">${it.label}</div>
+            <div class="cell-val">${it.current.toFixed(2)}</div>
+            <div style="margin-top:4px; font-family:'JetBrains Mono',monospace; font-size:9px; opacity:0.75; display:flex; align-items:center; justify-content:center; gap:4px;">
+              <span style="display:inline-block; width:8px; height:8px; background:${avgBg}; border:1px solid rgba(0,0,0,0.2);"></span>
+              avg ${it.avg.toFixed(2)}
+            </div>
+          </div>`;
+        }).join("")}
+      </div>
+    </div>`;
+  }
+  host.className = "";
+  host.innerHTML = html;
+}
+
+function renderAllCharts() {
+  CHART_DATA = buildChartSeries();
+  if (!REGIME_COLOR) {
+    REGIME_COLOR = {
+      bull: cssvar("--bull"), neutral: cssvar("--neutral"), bear: cssvar("--bear"),
+    };
+  }
+  renderBtcAndPosition();
+  renderPercentileTop();
+  renderTrackRecord();
+  renderPositionFunction();
+  renderRegimeStrip();
+  renderPriceRegime();
+  renderHypothesisComposites();
+  renderSignalHeatmap();
+}
+
+function setupToggles() {
+  const bindings = [
+    { id: "toggle-btc",     key: "btc",     re: renderBtcAndPosition },
+    { id: "toggle-pct-top", key: "pctTop",  re: renderPercentileTop },
+    { id: "toggle-tr",      key: "tr",      re: renderTrackRecord },
+    { id: "toggle-state",   key: "state",   re: () => {
+      renderRegimeStrip(); renderPriceRegime(); renderHypothesisComposites();
+    }},
+  ];
+  bindings.forEach(b => {
+    const t = document.getElementById(b.id);
+    if (!t || t.dataset.wired) return;
+    t.dataset.wired = "1";
+    t.querySelectorAll("button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        chartRanges[b.key] = btn.dataset.range;
+        t.querySelectorAll("button").forEach(x => x.classList.toggle("active", x === btn));
+        b.re();
+      });
+    });
+  });
+}
+
+
+
+function handleAuthSweep(summary) {
+  if (summary.auth_failures.length < ENDPOINTS.length - 2) return false;
+  const hero = document.getElementById("hero");
+  hero.classList.add("placeholder", "error");
+  hero.className = "hero placeholder tall error";
+  hero.textContent =
+    "server returned 401 on every endpoint — BTC_API_TOKEN was likely rotated. " +
+    "Close this tab and reopen /dashboard to pick up fresh credentials.";
+  return true;
+}
+
+/* ── Orchestration ─────────────────────────────────────────── */
+
+function renderAll(summary) {
+  if (handleAuthSweep(summary)) return;
+  renderMasthead();
+  renderSummaryStrip();
+  renderHero();
+  renderDriversTable();
+  renderFlagsPanel();
+  renderPipelineFooter();
+  renderAllCharts();
+  setupToggles();
+  renderFallbackStatus();
+}
+
+/* ── Refresh button ────────────────────────────────────────── */
+
+function setRefreshInFlight(inFlight) {
+  const btn = document.getElementById("btn-refresh");
+  if (inFlight) { btn.disabled = true; btn.textContent = "↻ FETCHING…"; }
+  else          { btn.disabled = false; btn.textContent = "↻ REFRESH"; }
+}
+
+async function refresh() {
+  setRefreshInFlight(true);
+  try {
+    const summary = await fetchAll();
+    renderAll(summary);
+  } catch (e) {
+    console.error("fetchAll threw unexpectedly:", e);
+  } finally {
+    setRefreshInFlight(false);
+  }
+}
+
+/* ── init ──────────────────────────────────────────────────── */
+
+function init() {
+  document.getElementById("btn-refresh").addEventListener("click", refresh);
+
+  const now = new Date();
+  const iso = now.toISOString().slice(0, 16).replace("T", " ");
+  document.getElementById("masthead-date").textContent = iso + " UTC";
+
+  if (API_TOKEN === "{" + "{BTC_API_TOKEN}}") {
+    const hero = document.getElementById("hero");
+    hero.className = "hero placeholder tall error";
+    hero.textContent = "dashboard.html was loaded without server-side token injection — open via /dashboard, not as a static file";
+    return;
+  }
+
+  refresh();
+}
+
+init();
+</script>
+
+</body>
+</html>

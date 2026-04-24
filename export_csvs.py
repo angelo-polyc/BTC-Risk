@@ -33,6 +33,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 import pandas as pd
 
+from common import ENSEMBLE_FIT_START
+
 HERE = Path(__file__).parent
 ROOT = Path(os.environ.get("BTC_MODEL_ROOT", HERE))
 
@@ -221,6 +223,7 @@ def write_manifest(master_entries: list, weights_entry: dict,
     """
     manifest = {
         "generated_at":       datetime.now(timezone.utc).isoformat(),
+        "canonical_start":    ENSEMBLE_FIT_START.strftime("%Y-%m-%d"),
         "master_entries":     master_entries,
         "weights_entry":      weights_entry,
         "weight_history":     weight_history_entries,
