@@ -12,8 +12,8 @@ project_dir: .
 # Default: 22:00 UTC daily — after CME Friday close (settlement 21:00 UTC)
 # and far enough past daily Coinglass / Velo aggregation that endpoints are
 # stable. Change to match your venue preferences.
-cron: "0 22 * * *"
-timezone: UTC
+cron: "0 0 * * *"
+timezone: America/New_York
 
 # Rotating log settings. One file per day, retained this many days.
 log_dir: logs
