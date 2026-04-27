@@ -237,33 +237,43 @@ def regenerate_data_inventory(out_path: Path) -> None:
     Replaces a static checked-in CSV that nothing in the pipeline regenerated.
     The previous file was the v14-ship snapshot from 2026-04-22 and lied to
     every API consumer (and to me during diagnosis) about input coverage.
+
+    Defensive: per-parquet errors get logged and skipped; a top-level failure
+    logs the traceback and returns cleanly (never aborts the run_all chain).
     """
     if not RAW.exists():
         return
-    rows = []
-    for p in sorted(RAW.rglob("*.parquet")):
-        rel = p.relative_to(RAW)
-        group = rel.parts[0] if len(rel.parts) > 1 else "_root"
-        series = p.stem
-        try:
-            df = pd.read_parquet(p)
-        except Exception:
-            continue
-        if "date" in df.columns and len(df) > 0:
-            dates = pd.to_datetime(df["date"], errors="coerce").dropna()
-            if len(dates) > 0:
-                start = dates.min().strftime("%Y-%m-%d")
-                end   = dates.max().strftime("%Y-%m-%d")
-            else:
-                start, end = "", ""
-        else:
-            start = "0"
-            end   = str(max(0, len(df) - 1))
-        rows.append({"group": group, "series": series,
-                     "start": start, "end": end, "rows": len(df)})
-    pd.DataFrame(rows, columns=["group", "series", "start", "end", "rows"]).to_csv(
-        out_path, index=False)
-    print(f"wrote {out_path}  ({len(rows)} sources)")
+    try:
+        rows = []
+        for p in sorted(RAW.rglob("*.parquet")):
+            rel = p.relative_to(RAW)
+            group = rel.parts[0] if len(rel.parts) > 1 else "_root"
+            series = p.stem
+            try:
+                df = pd.read_parquet(p)
+                if "date" in df.columns and len(df) > 0:
+                    dates = pd.to_datetime(df["date"], errors="coerce").dropna()
+                    if len(dates) > 0:
+                        start = dates.min().strftime("%Y-%m-%d")
+                        end   = dates.max().strftime("%Y-%m-%d")
+                    else:
+                        start, end = "", ""
+                else:
+                    start = "0"
+                    end   = str(max(0, len(df) - 1))
+                rows.append({"group": group, "series": series,
+                             "start": start, "end": end, "rows": len(df)})
+            except Exception as e:
+                print(f"  data_inventory: skipping {rel}: {type(e).__name__}: {e}",
+                      file=sys.stderr)
+        pd.DataFrame(rows, columns=["group", "series", "start", "end", "rows"]).to_csv(
+            out_path, index=False)
+        print(f"wrote {out_path}  ({len(rows)} sources)")
+    except Exception as e:
+        import traceback
+        print(f"WARNING: regenerate_data_inventory failed: {type(e).__name__}: {e}",
+              file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
 
 
 def regenerate_raw_data_export(out_path: Path) -> None:
@@ -281,6 +291,11 @@ def regenerate_raw_data_export(out_path: Path) -> None:
 
     Like data_inventory.csv, this replaces a static 2026-04-22 snapshot that
     no pipeline step was overwriting.
+
+    Defensive: per-parquet errors get logged and skipped; a top-level failure
+    logs the traceback and returns cleanly (never aborts the run_all chain).
+    Best-effort by design — losing one parquet's contribution shouldn't deny
+    the API the other ~49 sources' worth of raw data.
     """
     if not RAW.exists():
         return
@@ -298,46 +313,62 @@ def regenerate_raw_data_export(out_path: Path) -> None:
         series = p.stem
         try:
             df = pd.read_parquet(p)
-        except Exception:
-            continue
-        if "date" not in df.columns or len(df) == 0:
-            continue
-        df = df.drop(columns=[c for c in df.columns if c in AUDIT_COLS | DIM_COLS],
-                     errors="ignore").copy()
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        df = df.dropna(subset=["date"])
-        if len(df) == 0:
-            continue
-
-        pivot_keys = [c for c in PIVOT_KEYS if c in df.columns]
-        if pivot_keys:
-            pivot_key = pivot_keys[0]
-            value_cols = [c for c in df.columns if c not in ("date", pivot_key)]
-            if not value_cols:
+            if "date" not in df.columns or len(df) == 0:
                 continue
-            df = df.pivot_table(
-                index="date", columns=pivot_key,
-                values=value_cols, aggfunc="first",
-            )
-            df.columns = [
-                "__".join(str(x) for x in (col if isinstance(col, tuple) else (col,)))
-                for col in df.columns
-            ]
-            df = df.reset_index()
+            df = df.drop(columns=[c for c in df.columns if c in AUDIT_COLS | DIM_COLS],
+                         errors="ignore").copy()
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+            df = df.dropna(subset=["date"])
+            if len(df) == 0:
+                continue
 
-        df.columns = ["date" if c == "date" else f"{group}__{series}__{c}"
-                      for c in df.columns]
-        frames.append(df)
+            pivot_keys = [c for c in PIVOT_KEYS if c in df.columns]
+            if pivot_keys:
+                pivot_key = pivot_keys[0]
+                value_cols = [c for c in df.columns if c not in ("date", pivot_key)]
+                if not value_cols:
+                    continue
+                df = df.pivot_table(
+                    index="date", columns=pivot_key,
+                    values=value_cols, aggfunc="first",
+                )
+                df.columns = [
+                    "__".join(str(x) for x in (col if isinstance(col, tuple) else (col,)))
+                    for col in df.columns
+                ]
+                df = df.reset_index()
+
+            # Last-resort dedup: if any non-pivot path still produced duplicate
+            # `date` rows, keep the first — outer merge would otherwise multiply.
+            df = df.drop_duplicates(subset=["date"], keep="first")
+
+            df.columns = ["date" if c == "date" else f"{group}__{series}__{c}"
+                          for c in df.columns]
+            frames.append(df)
+            print(f"  raw_data_export: {rel}  +{len(df.columns)-1} cols × {len(df)} rows")
+        except Exception as e:
+            import traceback
+            print(f"  raw_data_export: SKIP {rel}: {type(e).__name__}: {e}",
+                  file=sys.stderr)
+            print(traceback.format_exc(), file=sys.stderr)
 
     if not frames:
+        print("raw_data_export: no frames produced; skipping write", file=sys.stderr)
         return
-    out = frames[0]
-    for f in frames[1:]:
-        out = out.merge(f, on="date", how="outer")
-    out = out.sort_values("date").reset_index(drop=True)
-    out["date"] = out["date"].dt.strftime("%Y-%m-%d")
-    out.to_csv(out_path, index=False)
-    print(f"wrote {out_path}  ({len(out)} rows × {len(out.columns)} cols)")
+
+    try:
+        out = frames[0]
+        for f in frames[1:]:
+            out = out.merge(f, on="date", how="outer")
+        out = out.sort_values("date").reset_index(drop=True)
+        out["date"] = out["date"].dt.strftime("%Y-%m-%d")
+        out.to_csv(out_path, index=False)
+        print(f"wrote {out_path}  ({len(out)} rows × {len(out.columns)} cols)")
+    except Exception as e:
+        import traceback
+        print(f"WARNING: raw_data_export merge/write failed: "
+              f"{type(e).__name__}: {e}", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
 
 
 def compute_data_freshness() -> dict:
