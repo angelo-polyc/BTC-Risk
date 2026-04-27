@@ -38,6 +38,17 @@ from common import ENSEMBLE_FIT_START
 HERE = Path(__file__).parent
 ROOT = Path(os.environ.get("BTC_MODEL_ROOT", HERE))
 
+# OUT_DIR is the persistent destination for top-level CSVs and the manifest.
+# Phase 2 volume refactor: on Railway, BTC_DATA_DIR=/app/data (the volume
+# mount); locally it falls back to BTC_MODEL_ROOT (the project checkout) so
+# `bash run_all.sh` keeps writing into the repo dir as before.
+# The order is intentional: BTC_DATA_DIR > BTC_MODEL_ROOT > script-parent.
+OUT_DIR = Path(
+    os.environ.get("BTC_DATA_DIR")
+    or os.environ.get("BTC_MODEL_ROOT")
+    or HERE
+)
+
 DERIVED = ROOT / "data/derived"
 HYP = ROOT / "data/hypotheses"
 FINAL = ROOT / "data/final"
@@ -62,7 +73,7 @@ STANDALONE_CSV_NAMES = {
     "eth":                ["hypothesis_eth.csv"],
 }
 
-MANIFEST_PATH = HERE / "export_manifest.json"
+MANIFEST_PATH = OUT_DIR / "export_manifest.json"
 
 
 def _sha256(path: Path) -> str:
@@ -211,6 +222,122 @@ def build_standalone_hypothesis_csvs(out_dir: Path) -> list:
         print(f"wrote hypothesis_{group}.csv  ({len(df_out)} rows, {len(keep_cols)+1} cols, "
               f"source={src_path.name})")
     return manifest_entries
+
+
+def regenerate_data_inventory(out_path: Path) -> None:
+    """Walk data/raw/**/*.parquet and rewrite data_inventory.csv from live state.
+
+    Schema (5 cols, matches the static checked-in version):
+        group,series,start,end,rows
+
+    For time-series parquets (have a `date` column), start/end are the min/max
+    date as YYYY-MM-DD. For row-indexed metadata (`etf_list`, `etf_detail` —
+    no date column), start/end are 0 and len-1, matching the historical format.
+
+    Replaces a static checked-in CSV that nothing in the pipeline regenerated.
+    The previous file was the v14-ship snapshot from 2026-04-22 and lied to
+    every API consumer (and to me during diagnosis) about input coverage.
+    """
+    if not RAW.exists():
+        return
+    rows = []
+    for p in sorted(RAW.rglob("*.parquet")):
+        rel = p.relative_to(RAW)
+        group = rel.parts[0] if len(rel.parts) > 1 else "_root"
+        series = p.stem
+        try:
+            df = pd.read_parquet(p)
+        except Exception:
+            continue
+        if "date" in df.columns and len(df) > 0:
+            dates = pd.to_datetime(df["date"], errors="coerce").dropna()
+            if len(dates) > 0:
+                start = dates.min().strftime("%Y-%m-%d")
+                end   = dates.max().strftime("%Y-%m-%d")
+            else:
+                start, end = "", ""
+        else:
+            start = "0"
+            end   = str(max(0, len(df) - 1))
+        rows.append({"group": group, "series": series,
+                     "start": start, "end": end, "rows": len(df)})
+    pd.DataFrame(rows, columns=["group", "series", "start", "end", "rows"]).to_csv(
+        out_path, index=False)
+    print(f"wrote {out_path}  ({len(rows)} sources)")
+
+
+def regenerate_raw_data_export(out_path: Path) -> None:
+    """Walk data/raw/**/*.parquet and rewrite raw_data_export.csv as a wide
+    table keyed by date.
+
+    Column convention: `{group}__{series}__{col}` where group is the parent
+    directory name and series is the parquet filename stem. For long-format
+    parquets with an `exchange` pivot key (Velo, Coinglass H2 liquidations),
+    the exchange becomes part of the column name:
+        `{group}__{series}__{value_col}__{exchange}`
+
+    Audit columns (`_source`, `_pulled_at`, `_rows`) and constant-within-file
+    dimension columns (`symbol`, `metric`, `velo_type`, `coin`) are dropped.
+
+    Like data_inventory.csv, this replaces a static 2026-04-22 snapshot that
+    no pipeline step was overwriting.
+    """
+    if not RAW.exists():
+        return
+
+    AUDIT_COLS = {"_source", "_pulled_at", "_rows"}
+    # Constant-per-parquet labels (the parquet filename already encodes them).
+    DIM_COLS = {"symbol", "metric", "velo_type", "coin"}
+    # One-row-per-(date, key) pivot keys.
+    PIVOT_KEYS = ["exchange"]
+
+    frames: list[pd.DataFrame] = []
+    for p in sorted(RAW.rglob("*.parquet")):
+        rel = p.relative_to(RAW)
+        group = rel.parts[0] if len(rel.parts) > 1 else "_root"
+        series = p.stem
+        try:
+            df = pd.read_parquet(p)
+        except Exception:
+            continue
+        if "date" not in df.columns or len(df) == 0:
+            continue
+        df = df.drop(columns=[c for c in df.columns if c in AUDIT_COLS | DIM_COLS],
+                     errors="ignore").copy()
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df = df.dropna(subset=["date"])
+        if len(df) == 0:
+            continue
+
+        pivot_keys = [c for c in PIVOT_KEYS if c in df.columns]
+        if pivot_keys:
+            pivot_key = pivot_keys[0]
+            value_cols = [c for c in df.columns if c not in ("date", pivot_key)]
+            if not value_cols:
+                continue
+            df = df.pivot_table(
+                index="date", columns=pivot_key,
+                values=value_cols, aggfunc="first",
+            )
+            df.columns = [
+                "__".join(str(x) for x in (col if isinstance(col, tuple) else (col,)))
+                for col in df.columns
+            ]
+            df = df.reset_index()
+
+        df.columns = ["date" if c == "date" else f"{group}__{series}__{c}"
+                      for c in df.columns]
+        frames.append(df)
+
+    if not frames:
+        return
+    out = frames[0]
+    for f in frames[1:]:
+        out = out.merge(f, on="date", how="outer")
+    out = out.sort_values("date").reset_index(drop=True)
+    out["date"] = out["date"].dt.strftime("%Y-%m-%d")
+    out.to_csv(out_path, index=False)
+    print(f"wrote {out_path}  ({len(out)} rows × {len(out.columns)} cols)")
 
 
 def compute_data_freshness() -> dict:
@@ -433,6 +560,10 @@ def main():
                     help="Don't regenerate standalone hypothesis_*.csv files.")
     ap.add_argument("--skip-manifest", action="store_true",
                     help="Don't write export_manifest.json.")
+    ap.add_argument("--skip-data-inventory", action="store_true",
+                    help="Don't regenerate data_inventory.csv from live parquets.")
+    ap.add_argument("--skip-raw-export", action="store_true",
+                    help="Don't regenerate raw_data_export.csv from live parquets.")
     ap.add_argument("--check-coherence", action="store_true",
                     help="Verify files on disk match the manifest; exit 0 if OK, "
                          "1 if not. No writes.")
@@ -451,24 +582,39 @@ def main():
 
     master_entries = []
 
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
     if args.label is None and args.variant is None:
         for variant in VALID_VARIANTS:
             master_entries.append(build_master(
-                "y_60", variant, HERE / f"master_daily_view_{variant}.csv"))
+                "y_60", variant, OUT_DIR / f"master_daily_view_{variant}.csv"))
     elif args.label is None or args.variant is None:
         sys.stderr.write("ERROR: must specify both --label and --variant, or neither.\n")
         sys.exit(1)
     else:
-        out = args.out or (HERE / f"master_daily_view_{args.variant}.csv")
+        # Resolve a relative --out against OUT_DIR; absolute --out is honored as-is.
+        if args.out is None:
+            out = OUT_DIR / f"master_daily_view_{args.variant}.csv"
+        elif args.out.is_absolute():
+            out = args.out
+        else:
+            out = OUT_DIR / args.out
         master_entries.append(build_master(args.label, args.variant, out))
 
     weights_entry = {}
     if not args.skip_weights:
-        weights_entry = build_weights_csv(HERE / "weights.csv")
+        weights_entry = build_weights_csv(OUT_DIR / "weights.csv")
 
     hypothesis_entries = []
     if not args.skip_hypotheses:
-        hypothesis_entries = build_standalone_hypothesis_csvs(HERE)
+        hypothesis_entries = build_standalone_hypothesis_csvs(OUT_DIR)
+
+    # Fix #3: regenerate the previously-static reference CSVs from live parquets
+    # so /data_inventory and /raw_data_export stop serving stale 2026-04-22 snapshots.
+    if not args.skip_data_inventory:
+        regenerate_data_inventory(OUT_DIR / "data_inventory.csv")
+    if not args.skip_raw_export:
+        regenerate_raw_data_export(OUT_DIR / "raw_data_export.csv")
 
     if not args.skip_manifest:
         weight_history_entries = build_weight_history_manifest()

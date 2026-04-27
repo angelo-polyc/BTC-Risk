@@ -45,11 +45,14 @@ steps:
   - name: check_freshness
     cmd: ["python3", "export_csvs.py", "--check-freshness", "36"]
     timeout_sec: 60
+  # Phase 2 volume refactor: --out paths are absolute on the persistent volume
+  # so health_check.csv and shadow_state.csv survive redeploys. Both files are
+  # listed in .gitignore but live alongside the master CSVs in /app/data.
   - name: health_check
-    cmd: ["python3", "health_check.py", "--out", "health_check.csv"]
+    cmd: ["python3", "health_check.py", "--out", "/app/data/health_check.csv"]
     timeout_sec: 300
   - name: shadow_tracker
-    cmd: ["python3", "shadow_tracker.py", "--out", "shadow_state.csv"]
+    cmd: ["python3", "shadow_tracker.py", "--out", "/app/data/shadow_state.csv"]
     timeout_sec: 300
   # audit_log MUST run last — it reads the regenerated master_daily_view and
   # appends today's row to paper_trading_log.csv. Starts empty on deploy;
@@ -63,5 +66,7 @@ steps:
   #   ["python3", "audit_log.py", "--push-best-effort"]   # push failures don't abort
   #   ["python3", "audit_log.py", "--push"]               # push failures mark sequence FAILED
   - name: audit_log
-    cmd: ["python3", "audit_log.py", "--log-dir", "/app/data", "--no-git"]
+    # --master-dir points at the post-Phase-2 location of master_daily_view_*.csv
+    # (was /app pre-refactor; now /app/data alongside the volume-backed parquets).
+    cmd: ["python3", "audit_log.py", "--master-dir", "/app/data", "--log-dir", "/app/data", "--no-git"]
     timeout_sec: 60

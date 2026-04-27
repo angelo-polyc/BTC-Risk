@@ -31,8 +31,16 @@ fi
 
 # ─── Validate required secrets ────────────────────────────────────────────────
 : "${BTC_API_TOKEN:?BTC_API_TOKEN must be set}"
-: "${BTC_MODEL_DIR:=$(pwd)}"
-export BTC_MODEL_DIR
+
+# Phase 2 volume refactor: top-level CSVs and the manifest live on the
+# persistent volume (/app/data on Railway), not on ephemeral /app. Both env
+# vars default to /app/data here so a Railway redeploy serves volume-backed
+# state immediately on boot — no cold-pull required for the API to be useful.
+# These can still be overridden via Railway's Variables panel.
+: "${BTC_DATA_DIR:=/app/data}"
+: "${BTC_MODEL_DIR:=$BTC_DATA_DIR}"
+: "${BTC_MODEL_ROOT:=$(pwd)}"
+export BTC_DATA_DIR BTC_MODEL_DIR BTC_MODEL_ROOT
 
 # Replit injects PORT; fall back to 8000 locally.
 : "${PORT:=8000}"
