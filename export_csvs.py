@@ -41,6 +41,7 @@ ROOT = Path(os.environ.get("BTC_MODEL_ROOT", HERE))
 DERIVED = ROOT / "data/derived"
 HYP = ROOT / "data/hypotheses"
 FINAL = ROOT / "data/final"
+RAW = ROOT / "data/raw"
 
 VALID_VARIANTS = ("wf365", "sf730")
 VALID_LABELS = ("y_60", "y_30")
@@ -212,6 +213,103 @@ def build_standalone_hypothesis_csvs(out_dir: Path) -> list:
     return manifest_entries
 
 
+def compute_data_freshness() -> dict:
+    """Walk data/raw/**/*.parquet, read each parquet's `_pulled_at` audit column,
+    return newest/oldest pull timestamps + per-source ages.
+
+    The `_pulled_at` column is added to every parquet by pull_all_raw_data.py at
+    write time. If the daily cron is healthy and `--force` is set, every parquet
+    gets re-written each run, so newest_age_hours stays well under 24. If the
+    fetcher silently stops (cache-skip, API auth failure, etc.), newest_age_hours
+    is the canonical freshness signal — far more reliable than file mtimes or
+    the export_manifest's own generated_at (which only proves the export ran).
+    """
+    now = datetime.now(timezone.utc)
+    per_source: list[dict] = []
+    if not RAW.exists():
+        return {
+            "checked_at_utc":   now.isoformat(),
+            "raw_dir":          str(RAW),
+            "raw_dir_present":  False,
+            "per_source":       [],
+        }
+    for p in sorted(RAW.rglob("*.parquet")):
+        rel = p.relative_to(RAW).as_posix()
+        try:
+            df = pd.read_parquet(p, columns=["_pulled_at"])
+        except Exception as e:
+            per_source.append({
+                "source": rel, "pulled_at_utc": None,
+                "age_hours": None, "error": str(e),
+            })
+            continue
+        if "_pulled_at" not in df.columns or df["_pulled_at"].isna().all():
+            mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+            per_source.append({
+                "source": rel,
+                "pulled_at_utc": mtime.isoformat(),
+                "age_hours": round((now - mtime).total_seconds() / 3600, 2),
+                "source_field": "file_mtime",
+            })
+            continue
+        ts = pd.to_datetime(df["_pulled_at"].dropna()).max()
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        else:
+            ts = ts.tz_convert("UTC")
+        per_source.append({
+            "source": rel,
+            "pulled_at_utc": ts.isoformat(),
+            "age_hours": round((now - ts.to_pydatetime()).total_seconds() / 3600, 2),
+            "source_field": "_pulled_at",
+        })
+
+    valid_ages = [s["age_hours"] for s in per_source if s.get("age_hours") is not None]
+    return {
+        "checked_at_utc":     now.isoformat(),
+        "raw_dir":            str(RAW),
+        "raw_dir_present":    True,
+        "parquet_count":      len(per_source),
+        "newest_age_hours":   min(valid_ages) if valid_ages else None,
+        "oldest_age_hours":   max(valid_ages) if valid_ages else None,
+        "per_source":         per_source,
+    }
+
+
+def check_freshness(max_age_hours: float) -> int:
+    """Exit 0 if the freshest parquet under data/raw/ is younger than max_age_hours,
+    1 otherwise. Designed to be wired into daily_pipeline.py as a cheap post-pull
+    sanity step that fails the chain before stale numbers reach the audit log.
+
+    Checks `newest_age_hours` (not oldest) on purpose: some upstream sources are
+    weekly (CFTC TFF) or quarterly, so an "every parquet must be < 36h" rule
+    would false-alarm. The signal we want is "no parquet is being refreshed at
+    all" — that catches the cache-skip / cron-broken / token-expired classes.
+    """
+    fresh = compute_data_freshness()
+    if not fresh.get("raw_dir_present"):
+        print(f"freshness check: data/raw not present at {fresh['raw_dir']}",
+              file=sys.stderr)
+        return 1
+    newest = fresh.get("newest_age_hours")
+    if newest is None:
+        print("freshness check: no parquets found under data/raw", file=sys.stderr)
+        return 1
+    print(f"freshness check: newest pull {newest:.2f}h ago "
+          f"(oldest {fresh['oldest_age_hours']:.2f}h, {fresh['parquet_count']} parquets)")
+    if newest > max_age_hours:
+        print(f"FRESHNESS FAILED: newest pull is {newest:.2f}h old, "
+              f"threshold {max_age_hours:.0f}h. The fetcher is not refreshing "
+              f"upstream data — see pull_all.log and check --force / API tokens.",
+              file=sys.stderr)
+        for s in fresh["per_source"]:
+            age = s.get("age_hours")
+            if age is not None and age > max_age_hours:
+                print(f"  STALE {s['source']}: {age:.2f}h", file=sys.stderr)
+        return 1
+    return 0
+
+
 def write_manifest(master_entries: list, weights_entry: dict,
                    weight_history_entries: dict, hypothesis_entries: list) -> None:
     """Write export_manifest.json tying master, weights, weight_history, and
@@ -224,6 +322,7 @@ def write_manifest(master_entries: list, weights_entry: dict,
     manifest = {
         "generated_at":       datetime.now(timezone.utc).isoformat(),
         "canonical_start":    ENSEMBLE_FIT_START.strftime("%Y-%m-%d"),
+        "data_freshness":     compute_data_freshness(),
         "master_entries":     master_entries,
         "weights_entry":      weights_entry,
         "weight_history":     weight_history_entries,
@@ -337,10 +436,18 @@ def main():
     ap.add_argument("--check-coherence", action="store_true",
                     help="Verify files on disk match the manifest; exit 0 if OK, "
                          "1 if not. No writes.")
+    ap.add_argument("--check-freshness", type=float, default=None, metavar="MAX_HOURS",
+                    help="Exit 1 if the newest parquet under data/raw/ is older "
+                         "than MAX_HOURS. Catches the cache-skip / fetcher-broken "
+                         "failure modes that don't surface in /manifest.generated_at. "
+                         "No writes.")
     args = ap.parse_args()
 
     if args.check_coherence:
         sys.exit(check_coherence())
+
+    if args.check_freshness is not None:
+        sys.exit(check_freshness(args.check_freshness))
 
     master_entries = []
 

@@ -38,6 +38,13 @@ steps:
   - name: run_all
     cmd: ["bash", "run_all.sh", "--skip-deps"]
     timeout_sec: 1800
+  # Freshness gate: aborts the chain if no parquet under data/raw/ has been
+  # refreshed in the last 36h. Catches the cache-skip / fetcher-broken /
+  # token-expired classes BEFORE health_check + shadow_tracker + audit_log
+  # commit a stale daily row. Cheap: reads audit columns only, no API calls.
+  - name: check_freshness
+    cmd: ["python3", "export_csvs.py", "--check-freshness", "36"]
+    timeout_sec: 60
   - name: health_check
     cmd: ["python3", "health_check.py", "--out", "health_check.csv"]
     timeout_sec: 300
