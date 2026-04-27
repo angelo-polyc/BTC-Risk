@@ -317,7 +317,14 @@ def regenerate_raw_data_export(out_path: Path) -> None:
                 continue
             df = df.drop(columns=[c for c in df.columns if c in AUDIT_COLS | DIM_COLS],
                          errors="ignore").copy()
-            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+            # Normalize date dtype across parquets: pyarrow round-trips some
+            # parquets as tz-aware datetime64[ms, UTC] (e.g. artemis_etf/btc.
+            # parquet, which is written via pd.to_datetime(..., utc=True)) and
+            # others as tz-naive datetime64[ns]. pd.merge refuses to merge
+            # mixed-tz/precision keys. Coerce everything to a single naive ns
+            # representation so the outer merges can join cleanly.
+            df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True
+                                        ).dt.tz_convert(None)
             df = df.dropna(subset=["date"])
             if len(df) == 0:
                 continue
