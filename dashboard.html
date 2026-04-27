@@ -1034,6 +1034,25 @@ function renderMasthead() {
   document.getElementById("masthead-date").textContent = parts.join(" · ");
 }
 
+/* 7-day moving average of position. Uses the last 7 days from /history,
+   substituting today's row from /today if /history's tail doesn't include
+   it (cache-lag safety net). Returns null when fewer than 4 of the last
+   7 days have non-null positions, matching smaArray's 70% threshold for
+   a window of 7. */
+function computePosition7DMA() {
+  const t = STATE.today && STATE.today.ok ? STATE.today.data : null;
+  if (!t) return null;
+  const history = STATE.history && STATE.history.ok ? STATE.history.data.rows : [];
+  const tail = history.slice(-7).map(r => ({ date: r.date, position: r.position }));
+  if (tail.length === 0 || tail[tail.length - 1].date !== t.date) {
+    tail.push({ date: t.date, position: t.position });
+    if (tail.length > 7) tail.shift();
+  }
+  const valid = tail.map(r => r.position).filter(p => p != null && !isNaN(p));
+  if (valid.length < 4) return null;
+  return valid.reduce((s, v) => s + v, 0) / valid.length;
+}
+
 function renderSummaryStrip() {
   const strip = document.getElementById("summary-strip");
   if (!STATE.today || !STATE.today.ok) {
@@ -1046,9 +1065,11 @@ function renderSummaryStrip() {
   const prevPct = prev && prev.percentile != null ? prev.percentile : null;
   const pctDelta = prevPct !== null ? t.percentile - prevPct : null;
   const ctx = regimeContext(t, history);
+  const pos7 = computePosition7DMA();
+  const pos7Str = pos7 != null ? Math.round(pos7 * 100) + "%" : "—";
 
   strip.innerHTML =
-    `<span class="v">Long ${Math.round(t.position * 100)}%</span>` +
+    `<span class="v">Long ${pos7Str} (7d MA)</span>` +
     `<span class="sep">·</span>Regime ${t.regime}, day ${ctx.day}` +
     `<span class="sep">·</span>Percentile ${fmtPct(t.percentile)}` +
     `<span class="sep">·</span>Δ ${fmtSigned(pctDelta)}`;
@@ -1072,6 +1093,7 @@ function renderHero() {
 
   const posDelta = t.position - position_prev;
   const posDeltaStr = fmtSigned(posDelta);
+  const pos7 = computePosition7DMA();
 
   const ctx = regimeContext(t, history);
 
@@ -1098,11 +1120,11 @@ function renderHero() {
         Applying ${t.regime}-regime weight set</div>
     </div>
     <div class="metric">
-      <div class="label">Current position (long only)</div>
-      <div class="value">${Math.round(t.position * 100)}%</div>
-      <div class="annot">Target long BTC weight<br/>
-        <span class="mono">${posDeltaStr}</span> from
-        <span class="mono">${fmtPct(position_prev)}</span> prior session</div>
+      <div class="label">Position (7-day MA)</div>
+      <div class="value">${pos7 != null ? Math.round(pos7 * 100) + "%" : "—"}</div>
+      <div class="annot">Smoothed long BTC weight<br/>
+        Today raw: <span class="mono">${Math.round(t.position * 100)}%</span>
+        <span class="sep">·</span>Δ <span class="mono">${posDeltaStr}</span></div>
     </div>
   `;
 }
