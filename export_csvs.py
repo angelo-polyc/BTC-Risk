@@ -38,9 +38,21 @@ from common import ENSEMBLE_FIT_START
 HERE = Path(__file__).parent
 ROOT = Path(os.environ.get("BTC_MODEL_ROOT", HERE))
 
+# OUT_DIR is the persistent destination for top-level CSVs and the manifest.
+# Phase 2 volume refactor: on Railway, BTC_DATA_DIR=/app/data (the volume
+# mount); locally it falls back to BTC_MODEL_ROOT (the project checkout) so
+# `bash run_all.sh` keeps writing into the repo dir as before.
+# The order is intentional: BTC_DATA_DIR > BTC_MODEL_ROOT > script-parent.
+OUT_DIR = Path(
+    os.environ.get("BTC_DATA_DIR")
+    or os.environ.get("BTC_MODEL_ROOT")
+    or HERE
+)
+
 DERIVED = ROOT / "data/derived"
 HYP = ROOT / "data/hypotheses"
 FINAL = ROOT / "data/final"
+RAW = ROOT / "data/raw"
 
 VALID_VARIANTS = ("wf365", "sf730")
 VALID_LABELS = ("y_60", "y_30")
@@ -61,7 +73,7 @@ STANDALONE_CSV_NAMES = {
     "eth":                ["hypothesis_eth.csv"],
 }
 
-MANIFEST_PATH = HERE / "export_manifest.json"
+MANIFEST_PATH = OUT_DIR / "export_manifest.json"
 
 
 def _sha256(path: Path) -> str:
@@ -212,6 +224,294 @@ def build_standalone_hypothesis_csvs(out_dir: Path) -> list:
     return manifest_entries
 
 
+# Schema overrides to keep regenerate_*() outputs bit-compatible with the
+# historical static CSVs that consumers (dashboard, downstream tooling)
+# expect. The legacy schemas were not internally consistent — data_inventory
+# used short group names (cg_cycle) and asset-style series (BTC), while
+# raw_data_export used long group names (coinglass_cycle) and filename-stem
+# series (btc_ohlc) — so we need separate maps per output.
+
+# data_inventory.csv: matches the v14-ship static snapshot
+DI_GROUP_OVERRIDES = {
+    "coinglass_cycle": "cg_cycle",
+    "coinglass_h2":    "cg_h2",
+    "coinglass_h3":    "cg_h3",
+    "coinglass_h4":    "cg_h4",
+}
+DI_SERIES_OVERRIDES = {
+    ("cftc",  "cftc_133741_futopt"): "TFF_133741",
+    ("price", "btc_ohlc"):           "BTC",
+    ("price", "eth_ohlc"):           "ETH",
+}
+
+# raw_data_export.csv column-prefix overrides: groups stay long-form, series
+# only differ for cftc (uses CFTC contract code in column names).
+RDE_SERIES_OVERRIDES = {
+    ("cftc", "cftc_133741_futopt"): "TFF_133741",
+}
+
+
+def regenerate_data_inventory(out_path: Path) -> None:
+    """Walk data/raw/**/*.parquet and rewrite data_inventory.csv from live state.
+
+    Schema (5 cols, matches the static checked-in version):
+        group,series,start,end,rows
+
+    For time-series parquets (have a `date` column), start/end are the min/max
+    date as YYYY-MM-DD. For row-indexed metadata (`etf_list`, `etf_detail` —
+    no date column), start/end are 0 and len-1, matching the historical format.
+
+    Replaces a static checked-in CSV that nothing in the pipeline regenerated.
+    The previous file was the v14-ship snapshot from 2026-04-22 and lied to
+    every API consumer (and to me during diagnosis) about input coverage.
+
+    Group/series naming follows the historical static schema exactly via the
+    DI_GROUP_OVERRIDES / DI_SERIES_OVERRIDES maps so consumers that filter on
+    `group=='cg_cycle'` or `series=='TFF_133741'` keep working.
+
+    Defensive: per-parquet errors get logged and skipped; a top-level failure
+    logs the traceback and returns cleanly (never aborts the run_all chain).
+    """
+    if not RAW.exists():
+        return
+    try:
+        rows = []
+        for p in sorted(RAW.rglob("*.parquet")):
+            rel = p.relative_to(RAW)
+            raw_group = rel.parts[0] if len(rel.parts) > 1 else "_root"
+            raw_series = p.stem
+            group = DI_GROUP_OVERRIDES.get(raw_group, raw_group)
+            series = DI_SERIES_OVERRIDES.get((raw_group, raw_series), raw_series)
+            try:
+                df = pd.read_parquet(p)
+                if "date" in df.columns and len(df) > 0:
+                    dates = pd.to_datetime(df["date"], errors="coerce").dropna()
+                    if len(dates) > 0:
+                        start = dates.min().strftime("%Y-%m-%d")
+                        end   = dates.max().strftime("%Y-%m-%d")
+                    else:
+                        start, end = "", ""
+                else:
+                    start = "0"
+                    end   = str(max(0, len(df) - 1))
+                rows.append({"group": group, "series": series,
+                             "start": start, "end": end, "rows": len(df)})
+            except Exception as e:
+                print(f"  data_inventory: skipping {rel}: {type(e).__name__}: {e}",
+                      file=sys.stderr)
+        pd.DataFrame(rows, columns=["group", "series", "start", "end", "rows"]).to_csv(
+            out_path, index=False)
+        print(f"wrote {out_path}  ({len(rows)} sources)")
+    except Exception as e:
+        import traceback
+        print(f"WARNING: regenerate_data_inventory failed: {type(e).__name__}: {e}",
+              file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
+
+
+def regenerate_raw_data_export(out_path: Path) -> None:
+    """Walk data/raw/**/*.parquet and rewrite raw_data_export.csv as a wide
+    table keyed by date.
+
+    Column convention: `{group}__{series}__{col}` where group is the parent
+    directory name and series is the parquet filename stem. For long-format
+    parquets with an `exchange` pivot key (Velo, Coinglass H2 liquidations),
+    the exchange becomes part of the column name:
+        `{group}__{series}__{value_col}__{exchange}`
+
+    Audit columns (`_source`, `_pulled_at`, `_rows`) and constant-within-file
+    dimension columns (`symbol`, `metric`, `velo_type`, `coin`) are dropped.
+
+    Like data_inventory.csv, this replaces a static 2026-04-22 snapshot that
+    no pipeline step was overwriting.
+
+    Defensive: per-parquet errors get logged and skipped; a top-level failure
+    logs the traceback and returns cleanly (never aborts the run_all chain).
+    Best-effort by design — losing one parquet's contribution shouldn't deny
+    the API the other ~49 sources' worth of raw data.
+    """
+    if not RAW.exists():
+        return
+
+    AUDIT_COLS = {"_source", "_pulled_at", "_rows"}
+    # Constant-per-parquet labels (the parquet filename already encodes them).
+    DIM_COLS = {"symbol", "metric", "velo_type", "coin"}
+    # One-row-per-(date, key) pivot keys.
+    PIVOT_KEYS = ["exchange"]
+
+    frames: list[pd.DataFrame] = []
+    for p in sorted(RAW.rglob("*.parquet")):
+        rel = p.relative_to(RAW)
+        raw_group = rel.parts[0] if len(rel.parts) > 1 else "_root"
+        raw_series = p.stem
+        # Groups stay long-form (coinglass_cycle/h2/h3); only cftc series
+        # is mapped to the CFTC contract code per the historical schema.
+        group = raw_group
+        series = RDE_SERIES_OVERRIDES.get((raw_group, raw_series), raw_series)
+        try:
+            df = pd.read_parquet(p)
+            if "date" not in df.columns or len(df) == 0:
+                continue
+            df = df.drop(columns=[c for c in df.columns if c in AUDIT_COLS | DIM_COLS],
+                         errors="ignore").copy()
+            # Normalize date dtype across parquets: pyarrow round-trips some
+            # parquets as tz-aware datetime64[ms, UTC] (e.g. artemis_etf/btc.
+            # parquet, which is written via pd.to_datetime(..., utc=True)) and
+            # others as tz-naive datetime64[ns]. pd.merge refuses to merge
+            # mixed-tz/precision keys. Coerce everything to a single naive ns
+            # representation so the outer merges can join cleanly.
+            df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True
+                                        ).dt.tz_convert(None)
+            df = df.dropna(subset=["date"])
+            if len(df) == 0:
+                continue
+
+            pivot_keys = [c for c in PIVOT_KEYS if c in df.columns]
+            if pivot_keys:
+                pivot_key = pivot_keys[0]
+                value_cols = [c for c in df.columns if c not in ("date", pivot_key)]
+                if not value_cols:
+                    continue
+                df = df.pivot_table(
+                    index="date", columns=pivot_key,
+                    values=value_cols, aggfunc="first",
+                )
+                df.columns = [
+                    "__".join(str(x) for x in (col if isinstance(col, tuple) else (col,)))
+                    for col in df.columns
+                ]
+                df = df.reset_index()
+
+            # Last-resort dedup: if any non-pivot path still produced duplicate
+            # `date` rows, keep the first — outer merge would otherwise multiply.
+            df = df.drop_duplicates(subset=["date"], keep="first")
+
+            df.columns = ["date" if c == "date" else f"{group}__{series}__{c}"
+                          for c in df.columns]
+            frames.append(df)
+            print(f"  raw_data_export: {rel}  +{len(df.columns)-1} cols × {len(df)} rows")
+        except Exception as e:
+            import traceback
+            print(f"  raw_data_export: SKIP {rel}: {type(e).__name__}: {e}",
+                  file=sys.stderr)
+            print(traceback.format_exc(), file=sys.stderr)
+
+    if not frames:
+        print("raw_data_export: no frames produced; skipping write", file=sys.stderr)
+        return
+
+    try:
+        out = frames[0]
+        for f in frames[1:]:
+            out = out.merge(f, on="date", how="outer")
+        out = out.sort_values("date").reset_index(drop=True)
+        out["date"] = out["date"].dt.strftime("%Y-%m-%d")
+        out.to_csv(out_path, index=False)
+        print(f"wrote {out_path}  ({len(out)} rows × {len(out.columns)} cols)")
+    except Exception as e:
+        import traceback
+        print(f"WARNING: raw_data_export merge/write failed: "
+              f"{type(e).__name__}: {e}", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
+
+
+def compute_data_freshness() -> dict:
+    """Walk data/raw/**/*.parquet, read each parquet's `_pulled_at` audit column,
+    return newest/oldest pull timestamps + per-source ages.
+
+    The `_pulled_at` column is added to every parquet by pull_all_raw_data.py at
+    write time. If the daily cron is healthy and `--force` is set, every parquet
+    gets re-written each run, so newest_age_hours stays well under 24. If the
+    fetcher silently stops (cache-skip, API auth failure, etc.), newest_age_hours
+    is the canonical freshness signal — far more reliable than file mtimes or
+    the export_manifest's own generated_at (which only proves the export ran).
+    """
+    now = datetime.now(timezone.utc)
+    per_source: list[dict] = []
+    if not RAW.exists():
+        return {
+            "checked_at_utc":   now.isoformat(),
+            "raw_dir":          str(RAW),
+            "raw_dir_present":  False,
+            "per_source":       [],
+        }
+    for p in sorted(RAW.rglob("*.parquet")):
+        rel = p.relative_to(RAW).as_posix()
+        try:
+            df = pd.read_parquet(p, columns=["_pulled_at"])
+        except Exception as e:
+            per_source.append({
+                "source": rel, "pulled_at_utc": None,
+                "age_hours": None, "error": str(e),
+            })
+            continue
+        if "_pulled_at" not in df.columns or df["_pulled_at"].isna().all():
+            mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+            per_source.append({
+                "source": rel,
+                "pulled_at_utc": mtime.isoformat(),
+                "age_hours": round((now - mtime).total_seconds() / 3600, 2),
+                "source_field": "file_mtime",
+            })
+            continue
+        ts = pd.to_datetime(df["_pulled_at"].dropna()).max()
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        else:
+            ts = ts.tz_convert("UTC")
+        per_source.append({
+            "source": rel,
+            "pulled_at_utc": ts.isoformat(),
+            "age_hours": round((now - ts.to_pydatetime()).total_seconds() / 3600, 2),
+            "source_field": "_pulled_at",
+        })
+
+    valid_ages = [s["age_hours"] for s in per_source if s.get("age_hours") is not None]
+    return {
+        "checked_at_utc":     now.isoformat(),
+        "raw_dir":            str(RAW),
+        "raw_dir_present":    True,
+        "parquet_count":      len(per_source),
+        "newest_age_hours":   min(valid_ages) if valid_ages else None,
+        "oldest_age_hours":   max(valid_ages) if valid_ages else None,
+        "per_source":         per_source,
+    }
+
+
+def check_freshness(max_age_hours: float) -> int:
+    """Exit 0 if the freshest parquet under data/raw/ is younger than max_age_hours,
+    1 otherwise. Designed to be wired into daily_pipeline.py as a cheap post-pull
+    sanity step that fails the chain before stale numbers reach the audit log.
+
+    Checks `newest_age_hours` (not oldest) on purpose: some upstream sources are
+    weekly (CFTC TFF) or quarterly, so an "every parquet must be < 36h" rule
+    would false-alarm. The signal we want is "no parquet is being refreshed at
+    all" — that catches the cache-skip / cron-broken / token-expired classes.
+    """
+    fresh = compute_data_freshness()
+    if not fresh.get("raw_dir_present"):
+        print(f"freshness check: data/raw not present at {fresh['raw_dir']}",
+              file=sys.stderr)
+        return 1
+    newest = fresh.get("newest_age_hours")
+    if newest is None:
+        print("freshness check: no parquets found under data/raw", file=sys.stderr)
+        return 1
+    print(f"freshness check: newest pull {newest:.2f}h ago "
+          f"(oldest {fresh['oldest_age_hours']:.2f}h, {fresh['parquet_count']} parquets)")
+    if newest > max_age_hours:
+        print(f"FRESHNESS FAILED: newest pull is {newest:.2f}h old, "
+              f"threshold {max_age_hours:.0f}h. The fetcher is not refreshing "
+              f"upstream data — see pull_all.log and check --force / API tokens.",
+              file=sys.stderr)
+        for s in fresh["per_source"]:
+            age = s.get("age_hours")
+            if age is not None and age > max_age_hours:
+                print(f"  STALE {s['source']}: {age:.2f}h", file=sys.stderr)
+        return 1
+    return 0
+
+
 def write_manifest(master_entries: list, weights_entry: dict,
                    weight_history_entries: dict, hypothesis_entries: list) -> None:
     """Write export_manifest.json tying master, weights, weight_history, and
@@ -224,6 +524,7 @@ def write_manifest(master_entries: list, weights_entry: dict,
     manifest = {
         "generated_at":       datetime.now(timezone.utc).isoformat(),
         "canonical_start":    ENSEMBLE_FIT_START.strftime("%Y-%m-%d"),
+        "data_freshness":     compute_data_freshness(),
         "master_entries":     master_entries,
         "weights_entry":      weights_entry,
         "weight_history":     weight_history_entries,
@@ -334,34 +635,61 @@ def main():
                     help="Don't regenerate standalone hypothesis_*.csv files.")
     ap.add_argument("--skip-manifest", action="store_true",
                     help="Don't write export_manifest.json.")
+    ap.add_argument("--skip-data-inventory", action="store_true",
+                    help="Don't regenerate data_inventory.csv from live parquets.")
+    ap.add_argument("--skip-raw-export", action="store_true",
+                    help="Don't regenerate raw_data_export.csv from live parquets.")
     ap.add_argument("--check-coherence", action="store_true",
                     help="Verify files on disk match the manifest; exit 0 if OK, "
                          "1 if not. No writes.")
+    ap.add_argument("--check-freshness", type=float, default=None, metavar="MAX_HOURS",
+                    help="Exit 1 if the newest parquet under data/raw/ is older "
+                         "than MAX_HOURS. Catches the cache-skip / fetcher-broken "
+                         "failure modes that don't surface in /manifest.generated_at. "
+                         "No writes.")
     args = ap.parse_args()
 
     if args.check_coherence:
         sys.exit(check_coherence())
 
+    if args.check_freshness is not None:
+        sys.exit(check_freshness(args.check_freshness))
+
     master_entries = []
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     if args.label is None and args.variant is None:
         for variant in VALID_VARIANTS:
             master_entries.append(build_master(
-                "y_60", variant, HERE / f"master_daily_view_{variant}.csv"))
+                "y_60", variant, OUT_DIR / f"master_daily_view_{variant}.csv"))
     elif args.label is None or args.variant is None:
         sys.stderr.write("ERROR: must specify both --label and --variant, or neither.\n")
         sys.exit(1)
     else:
-        out = args.out or (HERE / f"master_daily_view_{args.variant}.csv")
+        # Resolve a relative --out against OUT_DIR; absolute --out is honored as-is.
+        if args.out is None:
+            out = OUT_DIR / f"master_daily_view_{args.variant}.csv"
+        elif args.out.is_absolute():
+            out = args.out
+        else:
+            out = OUT_DIR / args.out
         master_entries.append(build_master(args.label, args.variant, out))
 
     weights_entry = {}
     if not args.skip_weights:
-        weights_entry = build_weights_csv(HERE / "weights.csv")
+        weights_entry = build_weights_csv(OUT_DIR / "weights.csv")
 
     hypothesis_entries = []
     if not args.skip_hypotheses:
-        hypothesis_entries = build_standalone_hypothesis_csvs(HERE)
+        hypothesis_entries = build_standalone_hypothesis_csvs(OUT_DIR)
+
+    # Fix #3: regenerate the previously-static reference CSVs from live parquets
+    # so /data_inventory and /raw_data_export stop serving stale 2026-04-22 snapshots.
+    if not args.skip_data_inventory:
+        regenerate_data_inventory(OUT_DIR / "data_inventory.csv")
+    if not args.skip_raw_export:
+        regenerate_raw_data_export(OUT_DIR / "raw_data_export.csv")
 
     if not args.skip_manifest:
         weight_history_entries = build_weight_history_manifest()

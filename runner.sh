@@ -31,11 +31,38 @@ fi
 
 # ─── Validate required secrets ────────────────────────────────────────────────
 : "${BTC_API_TOKEN:?BTC_API_TOKEN must be set}"
-: "${BTC_MODEL_DIR:=$(pwd)}"
-export BTC_MODEL_DIR
+
+# Phase 2 volume refactor: top-level CSVs and the manifest live on the
+# persistent volume (/app/data on Railway), not on ephemeral /app. Both env
+# vars default to /app/data here so a Railway redeploy serves volume-backed
+# state immediately on boot — no cold-pull required for the API to be useful.
+# These can still be overridden via Railway's Variables panel.
+: "${BTC_DATA_DIR:=/app/data}"
+: "${BTC_MODEL_DIR:=$BTC_DATA_DIR}"
+: "${BTC_MODEL_ROOT:=$(pwd)}"
+export BTC_DATA_DIR BTC_MODEL_DIR BTC_MODEL_ROOT
 
 # Replit injects PORT; fall back to 8000 locally.
 : "${PORT:=8000}"
+
+# ─── Bootstrap committed-in-git static reference CSVs onto the volume ─────────
+# These files don't change between refits but live with the code at /app/.
+# Phase 2 points the API readers at /app/data, so we copy them across on
+# boot if missing. Subsequent boots are no-ops.
+# Without this step, /thresholds, /weight_history, /pinning_audit, and the
+# replayed-monitor history endpoints would 500 on a fresh volume.
+mkdir -p "$BTC_DATA_DIR"
+for f in thresholds.csv \
+         weight_history_wf365_y_60.csv \
+         weight_history_wf365_y_30.csv \
+         pinning_audit_findings.csv \
+         health_check_history.csv \
+         health_check_history_extended.csv; do
+  if [ ! -f "$BTC_DATA_DIR/$f" ] && [ -f "$BTC_MODEL_ROOT/$f" ]; then
+    cp "$BTC_MODEL_ROOT/$f" "$BTC_DATA_DIR/$f"
+    echo "[runner] bootstrapped $f to $BTC_DATA_DIR"
+  fi
+done
 
 # ─── Logs ─────────────────────────────────────────────────────────────────────
 mkdir -p logs

@@ -21,7 +21,7 @@
 #   bash run_all.sh --skip-deps        # skip pip install
 #   bash run_all.sh --skip-pull --skip-deps
 
-set -e
+set -eo pipefail
 cd "$(dirname "$0")"
 export BTC_MODEL_ROOT="${BTC_MODEL_ROOT:-$(pwd)}"
 
@@ -63,7 +63,13 @@ if [ $SKIP_PULL -eq 0 ]; then
     # Parser patches are folded into the per-source handlers — no separate
     # fix_parsers.py step needed. ARTEMIS_API_KEY env var takes priority over
     # the baked-in fallback.
-    python3 pull_all_raw_data.py --source all --out-dir data/raw 2>&1 | \
+    # --force bypasses the per-source cache-skip in pull_all_raw_data.py.
+    # Without it the daily cron reads back cached parquets and never
+    # refreshes upstream data; the model output silently goes stale.
+    # set -o pipefail (top of script) ensures pull failures abort run_all
+    # instead of being masked by grep's exit code.
+    python3 pull_all_raw_data.py --source all --out-dir data/raw --force 2>&1 | \
+        tee pull_all.log | \
         grep -E "(START|DONE|SUMMARY|WARNING|ERROR)" | head -50
 fi
 
