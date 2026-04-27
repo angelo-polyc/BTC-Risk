@@ -224,6 +224,33 @@ def build_standalone_hypothesis_csvs(out_dir: Path) -> list:
     return manifest_entries
 
 
+# Schema overrides to keep regenerate_*() outputs bit-compatible with the
+# historical static CSVs that consumers (dashboard, downstream tooling)
+# expect. The legacy schemas were not internally consistent — data_inventory
+# used short group names (cg_cycle) and asset-style series (BTC), while
+# raw_data_export used long group names (coinglass_cycle) and filename-stem
+# series (btc_ohlc) — so we need separate maps per output.
+
+# data_inventory.csv: matches the v14-ship static snapshot
+DI_GROUP_OVERRIDES = {
+    "coinglass_cycle": "cg_cycle",
+    "coinglass_h2":    "cg_h2",
+    "coinglass_h3":    "cg_h3",
+    "coinglass_h4":    "cg_h4",
+}
+DI_SERIES_OVERRIDES = {
+    ("cftc",  "cftc_133741_futopt"): "TFF_133741",
+    ("price", "btc_ohlc"):           "BTC",
+    ("price", "eth_ohlc"):           "ETH",
+}
+
+# raw_data_export.csv column-prefix overrides: groups stay long-form, series
+# only differ for cftc (uses CFTC contract code in column names).
+RDE_SERIES_OVERRIDES = {
+    ("cftc", "cftc_133741_futopt"): "TFF_133741",
+}
+
+
 def regenerate_data_inventory(out_path: Path) -> None:
     """Walk data/raw/**/*.parquet and rewrite data_inventory.csv from live state.
 
@@ -238,6 +265,10 @@ def regenerate_data_inventory(out_path: Path) -> None:
     The previous file was the v14-ship snapshot from 2026-04-22 and lied to
     every API consumer (and to me during diagnosis) about input coverage.
 
+    Group/series naming follows the historical static schema exactly via the
+    DI_GROUP_OVERRIDES / DI_SERIES_OVERRIDES maps so consumers that filter on
+    `group=='cg_cycle'` or `series=='TFF_133741'` keep working.
+
     Defensive: per-parquet errors get logged and skipped; a top-level failure
     logs the traceback and returns cleanly (never aborts the run_all chain).
     """
@@ -247,8 +278,10 @@ def regenerate_data_inventory(out_path: Path) -> None:
         rows = []
         for p in sorted(RAW.rglob("*.parquet")):
             rel = p.relative_to(RAW)
-            group = rel.parts[0] if len(rel.parts) > 1 else "_root"
-            series = p.stem
+            raw_group = rel.parts[0] if len(rel.parts) > 1 else "_root"
+            raw_series = p.stem
+            group = DI_GROUP_OVERRIDES.get(raw_group, raw_group)
+            series = DI_SERIES_OVERRIDES.get((raw_group, raw_series), raw_series)
             try:
                 df = pd.read_parquet(p)
                 if "date" in df.columns and len(df) > 0:
@@ -309,8 +342,12 @@ def regenerate_raw_data_export(out_path: Path) -> None:
     frames: list[pd.DataFrame] = []
     for p in sorted(RAW.rglob("*.parquet")):
         rel = p.relative_to(RAW)
-        group = rel.parts[0] if len(rel.parts) > 1 else "_root"
-        series = p.stem
+        raw_group = rel.parts[0] if len(rel.parts) > 1 else "_root"
+        raw_series = p.stem
+        # Groups stay long-form (coinglass_cycle/h2/h3); only cftc series
+        # is mapped to the CFTC contract code per the historical schema.
+        group = raw_group
+        series = RDE_SERIES_OVERRIDES.get((raw_group, raw_series), raw_series)
         try:
             df = pd.read_parquet(p)
             if "date" not in df.columns or len(df) == 0:
