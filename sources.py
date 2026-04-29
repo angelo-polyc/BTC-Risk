@@ -385,7 +385,7 @@ class SourceAPI:
 
     @_retry
     async def _cg_get(self, path: str, params: dict | None = None) -> dict:
-        headers = {"x-cg-demo-api-key": self._cg_key} if self._cg_key else {}
+        headers = {"x-cg-pro-api-key": self._cg_key} if self._cg_key else {}
         r = await self.client.get(f"{CG_BASE}{path}", params=params, headers=headers)
         r.raise_for_status()
         return r.json()
