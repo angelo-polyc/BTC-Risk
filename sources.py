@@ -33,7 +33,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 # Config
 # ---------------------------------------------------------------------------
 
-CG_BASE = "https://api.coingecko.com/api/v3"
+CG_BASE = "https://pro-api.coingecko.com/api/v3"
 CGLASS_BASE = "https://open-api-v4.coinglass.com"
 LLAMA_BASE = "https://api.llama.fi"
 
