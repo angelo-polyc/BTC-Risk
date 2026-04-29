@@ -462,13 +462,15 @@ class SourceAPI:
         return r.get("data", [])
 
     async def _cglass_funding_history(self, symbol: str, start_ms: int, end_ms: int):
-        r = await self._cglass_get("/api/futures/fundingRate/oi-weight-ohlc-history",
+        r = await self._cglass_get("/api/futures/funding-rate/oi-weight-history",
                                     params={"exchange": "Binance", "symbol": symbol,
-                                            "interval": "1d",
-                                            "startTime": start_ms // 1000,
-                                            "endTime": end_ms // 1000,
-                                            "limit": 35})
-        return r.get("data", [])
+                                            "interval": "1d", "limit": 35})
+        # close field is returned as a string — cast to float for downstream math
+        rows = r.get("data", [])
+        for row in rows:
+            if "close" in row and row["close"] is not None:
+                row["close"] = float(row["close"])
+        return rows
 
     async def _cglass_volume_history(self, symbol: str, start_ms: int, end_ms: int):
         r = await self._cglass_get("/api/futures_spot_volume_ratio",
