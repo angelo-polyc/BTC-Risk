@@ -107,6 +107,7 @@ class SourceAPI:
         self._llama_protocols: dict[str, str] = {}   # CG-id → DefiLlama slug
         self._cglass_supported: set[str] = set()     # symbols Coinglass tracks
         self._price_cache: dict[str, float] = {}     # CG-id → price USD (batched)
+        self._tickers_sem = asyncio.Semaphore(3)     # throttle concurrent tickers calls
 
     # -- lifecycle --
 
@@ -197,14 +198,21 @@ class SourceAPI:
 
     async def price_volume(self, token_id: str) -> tuple[float | None, float | None]:
         """CoinGecko: returns (price_usd, whitelist_filtered_vol_usd).
-        Price comes from the batch cache if prep_run(token_ids=...) was called."""
+        Price comes from the batch cache if prep_run(token_ids=...) was called.
+        Errors on price and vol are handled independently so a tickers failure
+        does not discard a successfully cached price."""
+        price = self._price_cache.get(token_id)
+        if price is None:
+            try:
+                price = await self._cg_simple_price(token_id)
+            except Exception as e:
+                print(f"[cg price] {token_id}: {e}")
+        vol = None
         try:
-            price = self._price_cache.get(token_id) or await self._cg_simple_price(token_id)
             vol = await self._cg_filtered_volume(token_id)
-            return price, vol
         except Exception as e:
-            print(f"[cg] {token_id}: {e}")
-            return None, None
+            print(f"[cg vol] {token_id}: {e}")
+        return price, vol
 
     async def derivatives(self, symbol: str) -> DerivsResult | None:
         """Coinglass: OI, OI-weighted annualized funding, perp volume, liqs/OI ratio."""
@@ -389,20 +397,21 @@ class SourceAPI:
 
     async def _cg_filtered_volume(self, token_id: str) -> float | None:
         """Sum converted_volume.usd over whitelisted CEX + green-trust DEX tickers."""
-        r = await self._cg_get(f"/coins/{token_id}/tickers",
-                                params={"depth": "false", "include_exchange_logo": "false"})
-        total = 0.0
-        for t in r.get("tickers", []):
-            market_name = (t.get("market") or {}).get("name", "")
-            market_id = (t.get("market") or {}).get("identifier", "")
-            trust = t.get("trust_score")
-            usd_vol = (t.get("converted_volume") or {}).get("usd")
-            if usd_vol is None:
-                continue
-            if market_name in ALLOWED_CEX:
-                total += usd_vol
-            elif trust == "green" and DEX_PATTERN.search(market_id or ""):
-                total += usd_vol
+        async with self._tickers_sem:
+            r = await self._cg_get(f"/coins/{token_id}/tickers",
+                                    params={"depth": "false", "include_exchange_logo": "false"})
+            total = 0.0
+            for t in r.get("tickers", []):
+                market_name = (t.get("market") or {}).get("name", "")
+                market_id = (t.get("market") or {}).get("identifier", "")
+                trust = t.get("trust_score")
+                usd_vol = (t.get("converted_volume") or {}).get("usd")
+                if usd_vol is None:
+                    continue
+                if market_name in ALLOWED_CEX:
+                    total += usd_vol
+                elif trust == "green" and DEX_PATTERN.search(market_id or ""):
+                    total += usd_vol
         return total or None
 
     # --- Coinglass ---
