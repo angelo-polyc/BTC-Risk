@@ -20,7 +20,6 @@ Usage:
 from __future__ import annotations
 
 import os
-import re
 import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -44,12 +43,6 @@ ALLOWED_CEX: set[str] = {
     "Bitstamp by Robinhood", "HashKey Exchange", "Backpack Exchange", "Binance US",
     "BitMEX", "Bithumb", "Bybit EU", "Hyperliquid",
 }
-
-# DEX patterns — included if green-trust at the ticker level
-DEX_PATTERN = re.compile(
-    r"(uniswap|pancakeswap|curve|raydium|aerodrome|velodrome|sushiswap|quickswap|meteora)",
-    re.I,
-)
 
 # DefiLlama slug overrides for known edge cases (CG-id → DefiLlama slug)
 SLUG_OVERRIDES: dict[str, str] = {
@@ -162,7 +155,7 @@ class SourceAPI:
 
     async def _fetch_dex_exchange_ids(self) -> None:
         """Paginate /exchanges and build a set of DEX exchange IDs.
-        DEX = any exchange listed by CoinGecko that isn't in our CEX allowlist."""
+        DEX = country is None (DEXes are non-custodial; CG always sets country for CEXes)."""
         try:
             ids: set[str] = set()
             for page in range(1, 20):
@@ -171,8 +164,8 @@ class SourceAPI:
                     break
                 for e in r:
                     eid = e.get("id", "")
-                    name = e.get("name", "")
-                    if eid and name not in ALLOWED_CEX:
+                    country = e.get("country")
+                    if eid and country is None:
                         ids.add(eid)
                 if len(r) < 250:
                     break
@@ -426,8 +419,9 @@ class SourceAPI:
 
     async def _cg_filtered_volume(self, token_id: str) -> tuple[float | None, float | None]:
         """Returns (spot_vol_usd, dex_vol_usd) from a single tickers call.
-        spot_vol = CEX allowlist + green-trust DEX tickers.
-        dex_vol  = green-trust DEX tickers only (exchange ID set built at startup)."""
+        spot_vol = CEX allowlist + DEX tickers.
+        dex_vol  = DEX tickers only (exchange ID set built at startup via country=None filter).
+        Note: CG Pro API returns trust_score=null in tickers — do not filter on it."""
         async with self._tickers_sem:
             r = await self._cg_get(f"/coins/{token_id}/tickers",
                                     params={"depth": "false", "include_exchange_logo": "false"})
@@ -436,13 +430,12 @@ class SourceAPI:
             for t in r.get("tickers", []):
                 market_name = (t.get("market") or {}).get("name", "")
                 market_id = (t.get("market") or {}).get("identifier", "")
-                trust = t.get("trust_score")
                 usd_vol = (t.get("converted_volume") or {}).get("usd")
                 if usd_vol is None:
                     continue
                 if market_name in ALLOWED_CEX:
                     spot_total += usd_vol
-                elif trust == "green" and market_id in self._dex_exchange_ids:
+                elif market_id in self._dex_exchange_ids:
                     spot_total += usd_vol
                     dex_total += usd_vol
         return spot_total or None, dex_total or None
