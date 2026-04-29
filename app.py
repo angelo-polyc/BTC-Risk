@@ -59,3 +59,43 @@ async def manual_backfill(x_api_key: str | None = None):
         raise HTTPException(status_code=401, detail="unauthorized")
     asyncio.create_task(run_backfill())
     return {"status": "started — backfill runs in background, takes 5-10 min"}
+
+@app.get("/debug/exchanges")
+async def debug_exchanges(x_api_key: str | None = None):
+    """Diagnose DEX exchange ID fetching — calls /exchanges live and reports results."""
+    if API_KEY and x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    from sources import SourceAPI
+    result = {"pages": [], "dex_count": 0, "error": None, "sample_dex_ids": []}
+    async with SourceAPI() as api:
+        try:
+            for page in range(1, 6):
+                try:
+                    r = await api._cg_get("/exchanges", params={"per_page": 250, "page": page})
+                    dex_on_page = [e["id"] for e in r if e.get("id") and e.get("country") is None]
+                    result["pages"].append({"page": page, "total": len(r), "dex_count": len(dex_on_page)})
+                    result["dex_count"] += len(dex_on_page)
+                    if page == 1:
+                        result["sample_dex_ids"] = dex_on_page[:10]
+                    if len(r) < 250:
+                        break
+                except Exception as e:
+                    result["error"] = f"page {page}: {type(e).__name__}: {e}"
+                    break
+        except Exception as e:
+            result["error"] = f"outer: {type(e).__name__}: {e}"
+    # Also test a single tickers call for LINK
+    async with SourceAPI() as api:
+        try:
+            r = await api._cg_get("/coins/chainlink/tickers",
+                                   params={"depth": "false", "include_exchange_logo": "false"})
+            tickers = r.get("tickers", [])
+            result["link_tickers_count"] = len(tickers)
+            result["link_sample"] = [
+                {"name": (t.get("market") or {}).get("name"), "id": (t.get("market") or {}).get("identifier"),
+                 "vol": (t.get("converted_volume") or {}).get("usd")}
+                for t in tickers[:5]
+            ]
+        except Exception as e:
+            result["link_tickers_error"] = f"{type(e).__name__}: {e}"
+    return result
