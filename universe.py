@@ -36,6 +36,7 @@ STABLE_IDS: set[str] = {
     "usds", "usd1", "ripple-usd", "rlusd", "bfusd", "usdtb", "usdai",
     "mountain-protocol-usdm", "usdm", "satusd", "frax-dollar", "frxusd",
     "usdf", "celo-dollar", "jusd", "reusd", "stable",
+    "re-protocol-reusd", "stable-2",
 }
 
 RWA_IDS: set[str] = {
@@ -44,6 +45,9 @@ RWA_IDS: set[str] = {
     "hashnote-usyc", "usyc",
     "janus-henderson-aaa-clo-etf-tokenized", "jaaa",
     "janus-henderson-us-treasury-n-etf-tokenized", "jtrsy",
+    # Actual CG IDs (guesses above were wrong — corrected 2026-04-29)
+    "janus-henderson-anemoy-treasury-fund",
+    "janus-henderson-anemoy-aaa-clo-fund",
 }
 
 WRAPPED_IDS: set[str] = {
