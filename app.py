@@ -54,26 +54,36 @@ async def manual_ingest(x_api_key: str | None = None):
 
 @app.get("/debug/liq")
 async def debug_liq(x_api_key: str | None = None):
-    """Debug: run derivs_history_30d for XRP and return liq data."""
+    """Debug: step each of the 4 history calls individually to isolate the failure."""
     if API_KEY and x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="unauthorized")
+    import traceback
     from sources import SourceAPI
     from datetime import datetime, timezone
+    result: dict = {}
     async with SourceAPI() as api:
         await api.prep_run()
         end_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
         start_ms = end_ms - 31 * 24 * 3600 * 1000
-        liq_hist = await api._cglass_liq_history("XRP", start_ms, end_ms)
-        rows = await api.derivs_history_30d("XRP")
-        liq_entries = [(str(d), round(liqr, 6)) for d, oi, fapr, pvol, liqr in rows if liqr is not None]
-    return {
-        "cglass_supported_count": len(api._cglass_supported),
-        "xrp_in_supported": "XRP" in api._cglass_supported,
-        "liq_hist_count": len(liq_hist) if not isinstance(liq_hist, Exception) else str(liq_hist),
-        "liq_hist_sample": liq_hist[:2] if liq_hist else [],
-        "derivs_rows": len(rows),
-        "liq_ratio_entries": liq_entries,
-    }
+        for name, coro in [
+            ("oi_hist",  api._cglass_oi_history("XRP", start_ms, end_ms)),
+            ("fr_hist",  api._cglass_funding_history("XRP", start_ms, end_ms)),
+            ("vol_hist", api._cglass_volume_history("XRP", start_ms, end_ms)),
+            ("liq_hist", api._cglass_liq_history("XRP", start_ms, end_ms)),
+        ]:
+            try:
+                data = await coro
+                result[name] = f"{len(data)} rows; sample={data[:1]}"
+            except Exception as exc:
+                result[name] = f"ERROR: {type(exc).__name__}: {exc}"
+        # Also run derivs_history_30d and capture any exception
+        try:
+            rows = await api.derivs_history_30d("XRP")
+            result["derivs_rows"] = len(rows)
+            result["derivs_sample"] = [(str(d), oi, fapr, pvol, liqr) for d, oi, fapr, pvol, liqr in rows[:2]]
+        except Exception:
+            result["derivs_exception"] = traceback.format_exc()
+    return result
 
 @app.post("/backfill")
 async def manual_backfill(x_api_key: str | None = None):
