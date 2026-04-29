@@ -106,6 +106,7 @@ class SourceAPI:
         self._cglass_today: dict[str, dict] = {}     # symbol → coins-markets row
         self._llama_protocols: dict[str, str] = {}   # CG-id → DefiLlama slug
         self._cglass_supported: set[str] = set()     # symbols Coinglass tracks
+        self._price_cache: dict[str, float] = {}     # CG-id → price USD (batched)
 
     # -- lifecycle --
 
@@ -128,14 +129,31 @@ class SourceAPI:
 
     # -- one-shot caches: call once per ingest run --
 
-    async def prep_run(self) -> None:
-        """Pre-fetch the Coinglass coins-markets snapshot (one call → all coins)
-        and the DefiLlama protocol map. Run this BEFORE iterating per-token."""
-        await asyncio.gather(
+    async def prep_run(self, token_ids: list[str] | None = None) -> None:
+        """Pre-fetch shared caches. Call BEFORE iterating per-token.
+        Pass token_ids to batch-fetch prices (saves ~291 individual CG calls)."""
+        tasks = [
             self._fetch_coinglass_coins_markets(),
             self._fetch_coinglass_supported(),
             self._fetch_defillama_protocols(),
-        )
+        ]
+        if token_ids:
+            tasks.append(self._batch_fetch_prices(token_ids))
+        await asyncio.gather(*tasks)
+
+    async def _batch_fetch_prices(self, token_ids: list[str]) -> None:
+        """Fetch prices for all token_ids in batches of 250 (2 calls for ~291 tokens)."""
+        batch_size = 250
+        for i in range(0, len(token_ids), batch_size):
+            batch = token_ids[i:i + batch_size]
+            try:
+                r = await self._cg_get("/simple/price",
+                                        params={"ids": ",".join(batch), "vs_currencies": "usd"})
+                for cg_id, data in r.items():
+                    if "usd" in data:
+                        self._price_cache[cg_id] = data["usd"]
+            except Exception as e:
+                print(f"[cg batch prices] batch {i}: {e}")
 
     async def _fetch_coinglass_coins_markets(self) -> None:
         try:
@@ -178,9 +196,10 @@ class SourceAPI:
     # -- today's metrics, per token --
 
     async def price_volume(self, token_id: str) -> tuple[float | None, float | None]:
-        """CoinGecko: returns (price_usd, whitelist_filtered_vol_usd)."""
+        """CoinGecko: returns (price_usd, whitelist_filtered_vol_usd).
+        Price comes from the batch cache if prep_run(token_ids=...) was called."""
         try:
-            price = await self._cg_simple_price(token_id)
+            price = self._price_cache.get(token_id) or await self._cg_simple_price(token_id)
             vol = await self._cg_filtered_volume(token_id)
             return price, vol
         except Exception as e:
@@ -197,7 +216,9 @@ class SourceAPI:
             if not row:
                 return None
             oi = row.get("open_interest_usd")
-            perp_vol = row.get("volume_usd_24h")
+            long_vol = row.get("long_volume_usd_24h") or 0
+            short_vol = row.get("short_volume_usd_24h") or 0
+            perp_vol = (long_vol + short_vol) or None
             long_liq = row.get("long_liquidation_usd_24h") or 0
             short_liq = row.get("short_liquidation_usd_24h") or 0
             liq_oi = (long_liq + short_liq) / oi if oi else None

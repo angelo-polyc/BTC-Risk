@@ -47,7 +47,8 @@ async def run_ingest() -> None:
     existing_by_id = {t["id"]: t for t in state.get("universe", [])}
 
     async with SourceAPI() as api:
-        # Warm caches once — coinglass coins-markets, supported symbols, llama protocols
+        # Resolve universe first (needs coinglass/llama caches from prep_run)
+        # We do a lightweight prep_run without batch prices, then re-run with ids
         await api.prep_run()
 
         universe = await resolve_universe(
@@ -57,6 +58,9 @@ async def run_ingest() -> None:
             api=api,
         )
         print(f"[ingest] universe size: {len(universe)}")
+
+        # Batch-fetch all prices in 2 CG calls instead of 291 individual ones
+        await api.prep_run(token_ids=[t.id for t in universe])
 
         sem = asyncio.Semaphore(8)
 

@@ -14,6 +14,20 @@ if TYPE_CHECKING:
 CG_BASE = "https://api.coingecko.com/api/v3"
 CG_KEY = os.environ.get("COINGECKO_API_KEY")
 
+# Hardcoded fallback — these are always excluded regardless of category API result
+STABLE_IDS: set[str] = {
+    "tether", "usd-coin", "dai", "first-digital-usd", "true-usd", "frax",
+    "usdd", "paypal-usd", "gemini-dollar", "nusd", "liquity-usd", "fei-usd",
+    "magic-internet-money", "usde", "ethena-usde", "curve-usd", "crvusd",
+    "usual-usd", "usd0", "resolv-usd",
+}
+WRAPPED_IDS: set[str] = {
+    "wrapped-bitcoin", "wrapped-ethereum", "weth", "staked-ether",
+    "wrapped-steth", "rocket-pool-eth", "binance-staked-eth",
+    "coinbase-wrapped-staked-eth", "mantle-staked-ether",
+    "wrapped-eeth", "wrapped-beacon-eth",
+}
+
 SLUG_OVERRIDES: dict[str, str] = {
     "ether-fi": "ether.fi",
     "syrup": "maple-finance",
@@ -117,6 +131,9 @@ async def resolve_universe(
                 _fetch_coinglass_supported(client),
                 _fetch_defillama_protocols(client),
             )
+
+    # Union hardcoded fallbacks with category-API results (handles rate-limit misses)
+    excluded_ids |= STABLE_IDS | WRAPPED_IDS
 
     out: list[Token] = []
     for c in markets[:top_n]:
