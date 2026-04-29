@@ -67,6 +67,8 @@ async def debug_liq(x_api_key: str | None = None):
         rows = await api.derivs_history_30d("XRP")
         liq_entries = [(str(d), round(liqr, 6)) for d, oi, fapr, pvol, liqr in rows if liqr is not None]
     return {
+        "cglass_supported_count": len(api._cglass_supported),
+        "xrp_in_supported": "XRP" in api._cglass_supported,
         "liq_hist_count": len(liq_hist) if not isinstance(liq_hist, Exception) else str(liq_hist),
         "liq_hist_sample": liq_hist[:2] if liq_hist else [],
         "derivs_rows": len(rows),
