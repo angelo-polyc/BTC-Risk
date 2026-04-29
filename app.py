@@ -52,22 +52,6 @@ async def manual_ingest(x_api_key: str | None = None):
     asyncio.create_task(run_ingest())
     return {"status": "started"}
 
-@app.get("/debug/liq")
-async def debug_liq(x_api_key: str | None = None):
-    """Sanity-check derivs_history_30d for XRP — confirms liq_oi_ratio fills."""
-    if API_KEY and x_api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="unauthorized")
-    from sources import SourceAPI
-    async with SourceAPI() as api:
-        await api.prep_run()
-        rows = await api.derivs_history_30d("XRP")
-    return {
-        "rows": len(rows),
-        "liq_filled": sum(1 for _, _, _, _, liqr in rows if liqr is not None),
-        "sample": [(str(d), oi, round(fapr, 4) if fapr else None, pvol, round(liqr, 6) if liqr else None)
-                   for d, oi, fapr, pvol, liqr in rows[-3:]],
-    }
-
 @app.post("/backfill")
 async def manual_backfill(x_api_key: str | None = None):
     """One-shot 30d history seeder. Run once after first deploy."""
