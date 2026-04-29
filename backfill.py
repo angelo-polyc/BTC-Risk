@@ -46,8 +46,8 @@ async def main() -> None:
                             metrics["liq_oi_ratio"].append({"d": d.isoformat(), "v": liqr})
 
                 # DefiLlama 30d history
-                if t.defillama_slug:
-                    for d, tvl, dexv in await api.protocol_history_30d(t.defillama_slug):
+                if t.defillama_slug or t.dex_chain:
+                    for d, tvl, dexv in await api.protocol_history_30d(t.defillama_slug, t.dex_chain):
                         if tvl is not None:
                             metrics["tvl"].append({"d": d.isoformat(), "v": tvl})
                         if dexv is not None:

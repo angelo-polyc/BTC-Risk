@@ -63,6 +63,39 @@ SLUG_OVERRIDES: dict[str, str] = {
     # add as discovered
 }
 
+# CoinGecko ID → DefiLlama chain name for L1/L2 tokens.
+# Used as fallback for dex_vol when /summary/dexs/{slug} 404s (the token is a chain,
+# not a DEX protocol). Chain-level DEX vol = proxy for ecosystem activity / gas-token demand.
+CHAIN_MAP: dict[str, str] = {
+    "binancecoin":              "bsc",
+    "avalanche-2":              "avalanche",
+    "tron":                     "tron",
+    "the-open-network":         "ton",
+    "near":                     "near",
+    "arbitrum":                 "arbitrum",
+    "optimism":                 "optimism",
+    "aptos":                    "aptos",
+    "sui":                      "sui",
+    "fantom":                   "fantom",
+    "sonic-3":                  "sonic",
+    "soniclabs":                "sonic",
+    "injective-protocol":       "injective",
+    "sei-network":              "sei",
+    "matic-network":            "polygon",
+    "polygon-ecosystem-token":  "polygon",
+    "celo":                     "celo",
+    "kava":                     "kava",
+    "mantle":                   "mantle",
+    "crypto-com-chain":         "cronos",
+    "coredaoorg":               "core",
+    "core-dao":                 "core",
+    "zksync":                   "zksync",
+    "blockstack":               "stacks",
+    "metis-token":              "metis",
+    "cardano":                  "cardano",
+    "immutable-x":              "immutablex",
+}
+
 
 @dataclass
 class Token:
@@ -71,6 +104,7 @@ class Token:
     rank: int
     defillama_slug: str | None
     has_coinglass: bool
+    dex_chain: str | None = None
 
 
 async def _fetch_top_300(client: httpx.AsyncClient) -> list[dict]:
@@ -183,5 +217,6 @@ async def resolve_universe(
             rank=c["market_cap_rank"] or 999,
             defillama_slug=slug,
             has_coinglass=has_coinglass,
+            dex_chain=CHAIN_MAP.get(c["id"]),
         ))
     return out

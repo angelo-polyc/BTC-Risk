@@ -83,8 +83,7 @@ def compute_zscores(metrics: dict) -> dict:
         "perp_vol_dz":  z("perp_vol",     "delta"),
         "liq_ratio_z":  z("liq_oi_ratio", "level"),
         "tvl_dz":       z("tvl",          "delta"),
-        # dex_vol omitted: DefiLlama DEX tracking only covers DEX protocol tokens
-        # (~4/280 in this universe). Null for 98% of tokens = noise, not signal.
+        "dex_vol_dz":   z("dex_vol",      "delta"),
     }
 
 
@@ -138,8 +137,8 @@ async def run_ingest() -> None:
                         out["funding_apr"] = derivs.funding_apr
                         out["perp_vol"] = derivs.perp_vol
                         out["liq_oi_ratio"] = derivs.liq_oi_ratio
-                if t.defillama_slug:
-                    tvl, dexv = await api.protocol(t.defillama_slug)
+                if t.defillama_slug or t.dex_chain:
+                    tvl, dexv = await api.protocol(t.defillama_slug, t.dex_chain)
                     out["tvl"] = tvl
                     out["dex_vol"] = dexv
             return t, out

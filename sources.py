@@ -244,14 +244,15 @@ class SourceAPI:
             print(f"[cglass] {sym}: {e}")
             return None
 
-    async def protocol(self, slug: str | None) -> tuple[float | None, float | None]:
-        """DefiLlama: returns (tvl_usd, 24h_dex_vol_usd)."""
-        if not slug:
+    async def protocol(self, slug: str | None, dex_chain: str | None = None) -> tuple[float | None, float | None]:
+        """DefiLlama: returns (tvl_usd, 24h_dex_vol_usd).
+        dex_chain: DefiLlama chain slug used as fallback when slug has no DEX listing."""
+        if not slug and not dex_chain:
             return None, None
         try:
             tvl, dex_vol = await asyncio.gather(
-                self._llama_protocol_tvl(slug),
-                self._llama_dex_vol_24h(slug),
+                self._llama_protocol_tvl(slug) if slug else asyncio.sleep(0),
+                self._llama_dex_vol_24h(slug, dex_chain),
                 return_exceptions=True,
             )
             tvl = tvl if not isinstance(tvl, Exception) else None
@@ -342,14 +343,14 @@ class SourceAPI:
             print(f"[cglass history] {sym}: {e}")
             return []
 
-    async def protocol_history_30d(self, slug: str | None) -> list[tuple[date, float | None, float | None]]:
+    async def protocol_history_30d(self, slug: str | None, dex_chain: str | None = None) -> list[tuple[date, float | None, float | None]]:
         """DefiLlama: returns [(date, tvl, dex_vol), ...] for last 30 days."""
-        if not slug:
+        if not slug and not dex_chain:
             return []
         try:
             tvl_hist, dex_hist = await asyncio.gather(
-                self._llama_tvl_history(slug),
-                self._llama_dex_vol_history(slug),
+                self._llama_tvl_history(slug) if slug else asyncio.sleep(0),
+                self._llama_dex_vol_history(slug, dex_chain),
                 return_exceptions=True,
             )
             def by_date(series):
@@ -518,28 +519,44 @@ class SourceAPI:
                 total += latest.get("totalLiquidityUSD") or 0
         return total or None
 
-    async def _llama_dex_vol_24h(self, slug: str) -> float | None:
-        try:
-            r = await self._llama_get(f"/summary/dexs/{slug}")
-            return r.get("total24h")
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
+    async def _llama_dex_vol_24h(self, slug: str | None, dex_chain: str | None = None) -> float | None:
+        if slug:
+            try:
+                r = await self._llama_get(f"/summary/dexs/{slug}")
+                return r.get("total24h")
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code != 404:
+                    raise
+                # 404: slug is not a DEX protocol → fall through to chain
+        if dex_chain:
+            try:
+                r = await self._llama_get(f"/overview/dexs/{dex_chain}")
+                return r.get("total24h")
+            except Exception:
                 return None
-            raise
+        return None
 
     async def _llama_tvl_history(self, slug: str) -> list[dict]:
         r = await self._llama_get(f"/protocol/{slug}")
         # Pick the aggregated tvl series (DefiLlama returns 'tvl' array at top level)
         return r.get("tvl") or []
 
-    async def _llama_dex_vol_history(self, slug: str) -> list[list]:
-        try:
-            r = await self._llama_get(f"/summary/dexs/{slug}?dataType=dailyVolume")
-            return r.get("totalDataChart") or []
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
+    async def _llama_dex_vol_history(self, slug: str | None, dex_chain: str | None = None) -> list[list]:
+        if slug:
+            try:
+                r = await self._llama_get(f"/summary/dexs/{slug}?dataType=dailyVolume")
+                return r.get("totalDataChart") or []
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code != 404:
+                    raise
+                # 404: slug is not a DEX protocol → fall through to chain
+        if dex_chain:
+            try:
+                r = await self._llama_get(f"/overview/dexs/{dex_chain}?dataType=dailyVolume")
+                return r.get("totalDataChart") or []
+            except Exception:
                 return []
-            raise
+        return []
 
 
 # ---------------------------------------------------------------------------
