@@ -12,7 +12,10 @@ from universe import resolve_universe
 DATA_FILE = Path(os.environ.get("DATA_DIR", "/data")) / "divergence.json"
 RETENTION_DAYS = 30
 
-EXCLUDE_CATEGORIES = {"Stablecoins", "Wrapped-Tokens", "Liquid-Staked-Tokens"}
+EXCLUDE_CATEGORIES = {
+    "Stablecoins", "Wrapped-Tokens", "Liquid-Staked-Tokens",
+    "Real World Assets",   # tokenized treasuries, RWA funds (BUIDL, USYC, JAAA, etc.)
+}
 PRESET_TOKENS = {
     "bitcoin", "ethereum", "solana", "hyperliquid", "syrup", "ether-fi",
     "ethena", "grass", "bittensor", "creator-chain", "berachain-bera", "aleo",
@@ -72,15 +75,16 @@ def compute_zscores(metrics: dict) -> dict:
         return _level_z(v) if kind == "level" else _delta_z(v)
 
     return {
-        "price_z":       z("price",        "level"),
-        "price_dz":      z("price",        "delta"),
-        "spot_vol_dz":   z("spot_vol",     "delta"),
-        "oi_dz":         z("oi",           "delta"),
-        "funding_z":     z("funding_apr",  "level"),
-        "perp_vol_dz":   z("perp_vol",     "delta"),
-        "liq_ratio_z":   z("liq_oi_ratio", "level"),
-        "tvl_dz":        z("tvl",          "delta"),
-        "dex_vol_dz":    z("dex_vol",      "delta"),
+        "price_z":      z("price",        "level"),
+        "price_dz":     z("price",        "delta"),
+        "spot_vol_dz":  z("spot_vol",     "delta"),
+        "oi_dz":        z("oi",           "delta"),
+        "funding_z":    z("funding_apr",  "level"),
+        "perp_vol_dz":  z("perp_vol",     "delta"),
+        "liq_ratio_z":  z("liq_oi_ratio", "level"),
+        "tvl_dz":       z("tvl",          "delta"),
+        # dex_vol omitted: DefiLlama DEX tracking only covers DEX protocol tokens
+        # (~4/280 in this universe). Null for 98% of tokens = noise, not signal.
     }
 
 

@@ -11,16 +11,41 @@ import httpx
 if TYPE_CHECKING:
     from sources import SourceAPI
 
-CG_BASE = "https://api.coingecko.com/api/v3"
+# Must be Pro endpoint — demo endpoint gets rate-limited on category calls,
+# causing excluded_ids to return empty and stables to leak into the universe.
+CG_BASE = "https://pro-api.coingecko.com/api/v3"
 CG_KEY = os.environ.get("COINGECKO_API_KEY")
 
-# Hardcoded fallback — these are always excluded regardless of category API result
+# CoinGecko category name → API slug
+_CAT_SLUGS: dict[str, str] = {
+    "Stablecoins":          "stablecoins",
+    "Wrapped-Tokens":       "wrapped-tokens",
+    "Liquid-Staked-Tokens": "liquid-staking-tokens",
+    "Real World Assets":    "real-world-assets",   # tokenized treasuries, RWA funds
+}
+
+# Hardcoded fallback — always excluded even if category API misses them.
+# Update this list whenever a new stable/RWA cracks the top-300.
 STABLE_IDS: set[str] = {
+    # Core / legacy stablecoins
     "tether", "usd-coin", "dai", "first-digital-usd", "true-usd", "frax",
     "usdd", "paypal-usd", "gemini-dollar", "nusd", "liquity-usd", "fei-usd",
     "magic-internet-money", "usde", "ethena-usde", "curve-usd", "crvusd",
     "usual-usd", "usd0", "resolv-usd",
+    # Confirmed leaking as of 2026-04-29 (fixed by Pro API; kept as defence-in-depth)
+    "usds", "usd1", "ripple-usd", "rlusd", "bfusd", "usdtb", "usdai",
+    "mountain-protocol-usdm", "usdm", "satusd", "frax-dollar", "frxusd",
+    "usdf", "celo-dollar", "jusd", "reusd", "stable",
 }
+
+RWA_IDS: set[str] = {
+    # Tokenized treasuries / institutional funds — confirmed leaking 2026-04-29
+    "blackrock-usd-institutional-digital-liquidity-fund", "buidl",
+    "hashnote-usyc", "usyc",
+    "janus-henderson-aaa-clo-etf-tokenized", "jaaa",
+    "janus-henderson-us-treasury-n-etf-tokenized", "jtrsy",
+}
+
 WRAPPED_IDS: set[str] = {
     "wrapped-bitcoin", "wrapped-ethereum", "weth", "staked-ether",
     "wrapped-steth", "rocket-pool-eth", "binance-staked-eth",
@@ -29,8 +54,8 @@ WRAPPED_IDS: set[str] = {
 }
 
 SLUG_OVERRIDES: dict[str, str] = {
-    "ether-fi": "ether.fi",
-    "syrup": "maple-finance",
+    "ether-fi":  "ether.fi",
+    "syrup":     "maple-finance",
     # add as discovered
 }
 
@@ -45,7 +70,7 @@ class Token:
 
 
 async def _fetch_top_300(client: httpx.AsyncClient) -> list[dict]:
-    headers = {"x-cg-demo-api-key": CG_KEY} if CG_KEY else {}
+    headers = {"x-cg-pro-api-key": CG_KEY} if CG_KEY else {}
     out = []
     for page in (1, 2):
         r = await client.get(
@@ -63,15 +88,10 @@ async def _fetch_top_300(client: httpx.AsyncClient) -> list[dict]:
 
 
 async def _fetch_excluded_ids(client: httpx.AsyncClient, categories: set[str]) -> set[str]:
-    headers = {"x-cg-demo-api-key": CG_KEY} if CG_KEY else {}
-    cat_map = {
-        "Stablecoins": "stablecoins",
-        "Wrapped-Tokens": "wrapped-tokens",
-        "Liquid-Staked-Tokens": "liquid-staking-tokens",
-    }
+    headers = {"x-cg-pro-api-key": CG_KEY} if CG_KEY else {}
     excluded: set[str] = set()
     for cat_name in categories:
-        slug = cat_map.get(cat_name, cat_name.lower())
+        slug = _CAT_SLUGS.get(cat_name, cat_name.lower().replace(" ", "-"))
         r = await client.get(
             f"{CG_BASE}/coins/markets",
             params={"vs_currency": "usd", "category": slug, "per_page": 250},
@@ -117,7 +137,6 @@ async def resolve_universe(
 
     async with httpx.AsyncClient() as client:
         if api is not None:
-            # api.prep_run() already has coinglass + llama data — only fetch CG
             markets, excluded_ids = await asyncio.gather(
                 _fetch_top_300(client),
                 _fetch_excluded_ids(client, exclude_categories),
@@ -132,8 +151,8 @@ async def resolve_universe(
                 _fetch_defillama_protocols(client),
             )
 
-    # Union hardcoded fallbacks with category-API results (handles rate-limit misses)
-    excluded_ids |= STABLE_IDS | WRAPPED_IDS
+    # Union hardcoded fallbacks — defence-in-depth against category API misses
+    excluded_ids |= STABLE_IDS | RWA_IDS | WRAPPED_IDS
 
     out: list[Token] = []
     for c in markets[:top_n]:
@@ -144,7 +163,11 @@ async def resolve_universe(
         sym = c["symbol"].upper()
 
         if api is not None:
-            has_coinglass = api.coinglass_supports(sym)
+            # Use coins-markets presence, not supported-coins list.
+            # supported-coins has 1152 symbols but many lack derivs history;
+            # _cglass_today only contains tokens the coins-markets endpoint returned,
+            # which is the actual data source for daily derivs snapshots.
+            has_coinglass = sym in api._cglass_today
             slug = api.defillama_slug(c["id"])
         else:
             has_coinglass = sym in (cg_supported or set())
