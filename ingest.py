@@ -2,6 +2,7 @@
 import os
 import json
 import asyncio
+import statistics
 from pathlib import Path
 from datetime import date, timedelta
 
@@ -28,6 +29,59 @@ def write_atomic(state: dict) -> None:
     tmp = DATA_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, separators=(",", ":")))
     tmp.replace(DATA_FILE)
+
+
+_MIN_POINTS = 5  # minimum series length for a meaningful z-score
+
+
+def _vals(series: list) -> list[float]:
+    return [r["v"] for r in sorted(series, key=lambda r: r["d"]) if r.get("v") is not None]
+
+
+def _level_z(values: list[float]) -> float | None:
+    if len(values) < _MIN_POINTS:
+        return None
+    sd = statistics.pstdev(values)
+    if sd == 0:
+        return None
+    return round((values[-1] - statistics.mean(values)) / sd, 2)
+
+
+def _delta_z(values: list[float]) -> float | None:
+    if len(values) < _MIN_POINTS + 1:
+        return None
+    pct = [(values[i] - values[i - 1]) / values[i - 1]
+           for i in range(1, len(values)) if values[i - 1] != 0]
+    if len(pct) < _MIN_POINTS:
+        return None
+    sd = statistics.pstdev(pct)
+    if sd == 0:
+        return None
+    return round((pct[-1] - statistics.mean(pct)) / sd, 2)
+
+
+def compute_zscores(metrics: dict) -> dict:
+    """Compute z-scores over the 30d series for each metric.
+
+    LEVEL z: how anomalous is today's absolute value.
+    DELTA z: how anomalous is today's 24h % change.
+    Returns None for any metric with insufficient history (< 5 points).
+    """
+    def z(metric, kind):
+        v = _vals(metrics.get(metric, []))
+        return _level_z(v) if kind == "level" else _delta_z(v)
+
+    return {
+        "price_z":       z("price",        "level"),
+        "price_dz":      z("price",        "delta"),
+        "spot_vol_dz":   z("spot_vol",     "delta"),
+        "oi_dz":         z("oi",           "delta"),
+        "funding_z":     z("funding_apr",  "level"),
+        "perp_vol_dz":   z("perp_vol",     "delta"),
+        "liq_ratio_z":   z("liq_oi_ratio", "level"),
+        "tvl_dz":        z("tvl",          "delta"),
+        "dex_vol_dz":    z("dex_vol",      "delta"),
+    }
 
 
 def merge_metric_series(existing: list, today: date, value: float | None) -> list:
@@ -105,6 +159,7 @@ async def run_ingest() -> None:
             "defillama_slug": t.defillama_slug,
             "coinglass_coverage": t.has_coinglass,
             "metrics": merged,
+            "zscores": compute_zscores(merged),
         })
 
     state = {"as_of": today.isoformat(), "universe": new_universe}

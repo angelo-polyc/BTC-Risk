@@ -6,7 +6,7 @@ from pathlib import Path
 
 from sources import SourceAPI
 from universe import resolve_universe
-from ingest import DATA_FILE, EXCLUDE_CATEGORIES, PRESET_TOKENS
+from ingest import DATA_FILE, EXCLUDE_CATEGORIES, PRESET_TOKENS, compute_zscores
 
 
 async def main() -> None:
@@ -67,6 +67,7 @@ async def main() -> None:
             "defillama_slug": t.defillama_slug,
             "coinglass_coverage": t.has_coinglass,
             "metrics": metrics,
+            "zscores": compute_zscores(metrics),
         })
 
     state = {"as_of": date.today().isoformat(), "universe": out_universe}
