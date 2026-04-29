@@ -45,13 +45,11 @@ async def main() -> None:
                         if liqr is not None:
                             metrics["liq_oi_ratio"].append({"d": d.isoformat(), "v": liqr})
 
-                # DefiLlama 30d history
+                # DefiLlama 30d history — TVL only; dex_vol source is CG tickers (daily ingest)
                 if t.defillama_slug or t.dex_chain:
-                    for d, tvl, dexv in await api.protocol_history_30d(t.defillama_slug, t.dex_chain):
+                    for d, tvl, _ in await api.protocol_history_30d(t.defillama_slug, t.dex_chain):
                         if tvl is not None:
                             metrics["tvl"].append({"d": d.isoformat(), "v": tvl})
-                        if dexv is not None:
-                            metrics["dex_vol"].append({"d": d.isoformat(), "v": dexv})
 
             print(f"[backfill] {t.symbol} done")
             return t, metrics

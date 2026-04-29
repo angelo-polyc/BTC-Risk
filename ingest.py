@@ -127,9 +127,10 @@ async def run_ingest() -> None:
                 "perp_vol": None, "liq_oi_ratio": None, "tvl": None, "dex_vol": None,
             }
             async with sem:
-                px, vol = await api.price_volume(t.id)
+                px, vol, dex_vol_snap = await api.price_volume(t.id)
                 out["price"] = px
                 out["spot_vol"] = vol
+                out["dex_vol"] = dex_vol_snap   # per-token DEX trading vol from CG tickers
                 if t.has_coinglass:
                     derivs = await api.derivatives(t.symbol)
                     if derivs:
@@ -138,9 +139,8 @@ async def run_ingest() -> None:
                         out["perp_vol"] = derivs.perp_vol
                         out["liq_oi_ratio"] = derivs.liq_oi_ratio
                 if t.defillama_slug or t.dex_chain:
-                    tvl, dexv = await api.protocol(t.defillama_slug, t.dex_chain)
-                    out["tvl"] = tvl
-                    out["dex_vol"] = dexv
+                    tvl, _ = await api.protocol(t.defillama_slug, t.dex_chain)
+                    out["tvl"] = tvl            # DefiLlama TVL only; dex_vol comes from CG
             return t, out
 
         results = await asyncio.gather(*(pull(t) for t in universe))

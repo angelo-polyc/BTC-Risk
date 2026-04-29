@@ -107,6 +107,7 @@ class SourceAPI:
         self._llama_protocols: dict[str, str] = {}   # CG-id → DefiLlama slug
         self._cglass_supported: set[str] = set()     # symbols Coinglass tracks
         self._price_cache: dict[str, float] = {}     # CG-id → price USD (batched)
+        self._dex_exchange_ids: set[str] = set()     # exchange IDs that are DEXes (from /exchanges)
         self._tickers_sem = asyncio.Semaphore(3)     # throttle concurrent tickers calls
 
     # -- lifecycle --
@@ -132,7 +133,8 @@ class SourceAPI:
 
     async def prep_run(self, token_ids: list[str] | None = None) -> None:
         """Pre-fetch shared caches. Call BEFORE iterating per-token.
-        Pass token_ids to batch-fetch prices (saves ~291 individual CG calls)."""
+        Pass token_ids to batch-fetch prices (saves ~291 individual CG calls).
+        First call (no token_ids) also loads the DEX exchange ID set."""
         tasks = [
             self._fetch_coinglass_coins_markets(),
             self._fetch_coinglass_supported(),
@@ -140,6 +142,8 @@ class SourceAPI:
         ]
         if token_ids:
             tasks.append(self._batch_fetch_prices(token_ids))
+        else:
+            tasks.append(self._fetch_dex_exchange_ids())
         await asyncio.gather(*tasks)
 
     async def _batch_fetch_prices(self, token_ids: list[str]) -> None:
@@ -155,6 +159,28 @@ class SourceAPI:
                         self._price_cache[cg_id] = data["usd"]
             except Exception as e:
                 print(f"[cg batch prices] batch {i}: {e}")
+
+    async def _fetch_dex_exchange_ids(self) -> None:
+        """Paginate /exchanges and build a set of DEX exchange IDs.
+        DEX = any exchange listed by CoinGecko that isn't in our CEX allowlist."""
+        try:
+            ids: set[str] = set()
+            for page in range(1, 20):
+                r = await self._cg_get("/exchanges", params={"per_page": 250, "page": page})
+                if not r:
+                    break
+                for e in r:
+                    eid = e.get("id", "")
+                    name = e.get("name", "")
+                    if eid and name not in ALLOWED_CEX:
+                        ids.add(eid)
+                if len(r) < 250:
+                    break
+            self._dex_exchange_ids = ids
+            print(f"[cg exchanges] {len(ids)} DEX exchange IDs loaded")
+        except Exception as e:
+            print(f"[cg exchanges] failed: {e}")
+            self._dex_exchange_ids = set()
 
     async def _fetch_coinglass_coins_markets(self) -> None:
         try:
@@ -196,23 +222,25 @@ class SourceAPI:
 
     # -- today's metrics, per token --
 
-    async def price_volume(self, token_id: str) -> tuple[float | None, float | None]:
-        """CoinGecko: returns (price_usd, whitelist_filtered_vol_usd).
+    async def price_volume(self, token_id: str) -> tuple[float | None, float | None, float | None]:
+        """CoinGecko: returns (price_usd, spot_vol_usd, dex_vol_usd).
+        spot_vol = CEX whitelist + all green-trust DEX tickers.
+        dex_vol  = green-trust DEX tickers only (per-token on-chain trading volume).
         Price comes from the batch cache if prep_run(token_ids=...) was called.
-        Errors on price and vol are handled independently so a tickers failure
-        does not discard a successfully cached price."""
+        Errors on price and vol are handled independently."""
         price = self._price_cache.get(token_id)
         if price is None:
             try:
                 price = await self._cg_simple_price(token_id)
             except Exception as e:
                 print(f"[cg price] {token_id}: {e}")
-        vol = None
+        spot_vol = None
+        dex_vol = None
         try:
-            vol = await self._cg_filtered_volume(token_id)
+            spot_vol, dex_vol = await self._cg_filtered_volume(token_id)
         except Exception as e:
             print(f"[cg vol] {token_id}: {e}")
-        return price, vol
+        return price, spot_vol, dex_vol
 
     async def derivatives(self, symbol: str) -> DerivsResult | None:
         """Coinglass: OI, OI-weighted annualized funding, perp volume, liqs/OI ratio."""
@@ -396,12 +424,15 @@ class SourceAPI:
                                 params={"ids": token_id, "vs_currencies": "usd"})
         return r.get(token_id, {}).get("usd")
 
-    async def _cg_filtered_volume(self, token_id: str) -> float | None:
-        """Sum converted_volume.usd over whitelisted CEX + green-trust DEX tickers."""
+    async def _cg_filtered_volume(self, token_id: str) -> tuple[float | None, float | None]:
+        """Returns (spot_vol_usd, dex_vol_usd) from a single tickers call.
+        spot_vol = CEX allowlist + green-trust DEX tickers.
+        dex_vol  = green-trust DEX tickers only (exchange ID set built at startup)."""
         async with self._tickers_sem:
             r = await self._cg_get(f"/coins/{token_id}/tickers",
                                     params={"depth": "false", "include_exchange_logo": "false"})
-            total = 0.0
+            spot_total = 0.0
+            dex_total = 0.0
             for t in r.get("tickers", []):
                 market_name = (t.get("market") or {}).get("name", "")
                 market_id = (t.get("market") or {}).get("identifier", "")
@@ -410,10 +441,11 @@ class SourceAPI:
                 if usd_vol is None:
                     continue
                 if market_name in ALLOWED_CEX:
-                    total += usd_vol
-                elif trust == "green" and DEX_PATTERN.search(market_id or ""):
-                    total += usd_vol
-        return total or None
+                    spot_total += usd_vol
+                elif trust == "green" and market_id in self._dex_exchange_ids:
+                    spot_total += usd_vol
+                    dex_total += usd_vol
+        return spot_total or None, dex_total or None
 
     # --- Coinglass ---
 
@@ -571,11 +603,11 @@ async def fetch_today(token_id: str, symbol: str, slug: str | None) -> dict:
     """One-shot helper: fetch all metrics for one token. For ad-hoc / debug use."""
     async with SourceAPI() as api:
         await api.prep_run()
-        px, vol = await api.price_volume(token_id)
+        px, vol, dex_vol = await api.price_volume(token_id)
         derivs = await api.derivatives(symbol)
-        tvl, dx = await api.protocol(slug)
+        tvl, _ = await api.protocol(slug)
         return {
-            "price": px, "spot_vol": vol,
+            "price": px, "spot_vol": vol, "dex_vol": dex_vol,
             "oi": derivs.oi if derivs else None,
             "funding_apr": derivs.funding_apr if derivs else None,
             "perp_vol": derivs.perp_vol if derivs else None,
@@ -592,12 +624,12 @@ if __name__ == "__main__":
             tid, sym = sys.argv[1] if len(sys.argv) > 1 else "bitcoin", \
                        sys.argv[2] if len(sys.argv) > 2 else "BTC"
             slug = api.defillama_slug(tid)
-            px, vol = await api.price_volume(tid)
+            px, vol, dex_vol = await api.price_volume(tid)
             derivs = await api.derivatives(sym)
-            tvl, dx = await api.protocol(slug)
+            tvl, _ = await api.protocol(slug)
             print(json.dumps({
                 "id": tid, "symbol": sym, "slug": slug,
-                "price": px, "spot_vol": vol,
+                "price": px, "spot_vol": vol, "dex_vol": dex_vol,
                 "derivs": {
                     "oi": derivs.oi if derivs else None,
                     "funding_apr_pct": derivs.funding_apr if derivs else None,
