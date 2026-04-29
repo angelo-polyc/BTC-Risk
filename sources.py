@@ -481,10 +481,18 @@ class SourceAPI:
         return r.get("data", [])
 
     async def _cglass_liq_history(self, symbol: str, start_ms: int, end_ms: int):
-        # aggregated-history takes a "range" param, not start/end — use the daily endpoint instead
-        # Fall back: pull the daily snapshots from coins-markets sequentially. For now, return empty.
-        # (Coinglass's free liquidation-history endpoint is limited; fill in based on plan tier.)
-        return []
+        r = await self._cglass_get("/api/futures/liquidation/aggregated-history",
+                                    params={"symbol": symbol, "interval": "1d",
+                                            "exchange_list": "Binance,OKX,Bybit",
+                                            "limit": 35})
+        out = []
+        for row in r.get("data", []):
+            out.append({
+                "time": row.get("time"),
+                "long_liquidation_usd": row.get("aggregated_long_liquidation_usd"),
+                "short_liquidation_usd": row.get("aggregated_short_liquidation_usd"),
+            })
+        return out
 
     # --- DefiLlama ---
 
