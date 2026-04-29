@@ -459,7 +459,11 @@ class SourceAPI:
                                     params={"symbol": symbol, "interval": "1d",
                                             "start_time": start_ms, "end_time": end_ms,
                                             "limit": 35, "unit": "usd"})
-        return r.get("data", [])
+        rows = r.get("data", [])
+        for row in rows:
+            if "close" in row and row["close"] is not None:
+                row["close"] = float(row["close"])
+        return rows
 
     async def _cglass_funding_history(self, symbol: str, start_ms: int, end_ms: int):
         r = await self._cglass_get("/api/futures/funding-rate/oi-weight-history",
