@@ -10,6 +10,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from ingest import run_ingest
+from backfill import main as run_backfill
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DATA_FILE = DATA_DIR / "divergence.json"
@@ -50,3 +51,11 @@ async def manual_ingest(x_api_key: str | None = None):
         raise HTTPException(status_code=401, detail="unauthorized")
     asyncio.create_task(run_ingest())
     return {"status": "started"}
+
+@app.post("/backfill")
+async def manual_backfill(x_api_key: str | None = None):
+    """One-shot 30d history seeder. Run once after first deploy."""
+    if API_KEY and x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    asyncio.create_task(run_backfill())
+    return {"status": "started — backfill runs in background, takes 5-10 min"}
