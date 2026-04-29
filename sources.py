@@ -527,8 +527,9 @@ class SourceAPI:
             except httpx.HTTPStatusError as e:
                 if e.response.status_code >= 500:
                     raise
-                # any 4xx (404 = slug unknown, 400 = slug is a chain not a DEX protocol)
-                # → fall through to chain endpoint
+                # any 4xx (400 = chain slug not a DEX protocol, 404 = unknown) → fall through
+            except Exception:
+                pass  # connection errors, timeouts → fall through to chain
         if dex_chain:
             try:
                 r = await self._llama_get(f"/overview/dexs/{dex_chain}")
@@ -551,6 +552,8 @@ class SourceAPI:
                 if e.response.status_code >= 500:
                     raise
                 # any 4xx → fall through to chain endpoint
+            except Exception:
+                pass  # connection errors, timeouts → fall through to chain
         if dex_chain:
             try:
                 r = await self._llama_get(f"/overview/dexs/{dex_chain}?dataType=dailyVolume")
