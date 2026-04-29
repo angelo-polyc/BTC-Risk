@@ -155,11 +155,16 @@ class SourceAPI:
 
     async def _fetch_dex_exchange_ids(self) -> None:
         """Paginate /exchanges and build a set of DEX exchange IDs.
-        DEX = country is None (DEXes are non-custodial; CG always sets country for CEXes)."""
+        DEX = country is None (DEXes are non-custodial; CG always sets country for CEXes).
+        Partial results are kept if a late page fails."""
+        ids: set[str] = set()
         try:
-            ids: set[str] = set()
             for page in range(1, 20):
-                r = await self._cg_get("/exchanges", params={"per_page": 250, "page": page})
+                try:
+                    r = await self._cg_get("/exchanges", params={"per_page": 250, "page": page})
+                except Exception as page_err:
+                    print(f"[cg exchanges] page {page} failed: {page_err}")
+                    break
                 if not r:
                     break
                 for e in r:
@@ -169,11 +174,10 @@ class SourceAPI:
                         ids.add(eid)
                 if len(r) < 250:
                     break
-            self._dex_exchange_ids = ids
-            print(f"[cg exchanges] {len(ids)} DEX exchange IDs loaded")
         except Exception as e:
-            print(f"[cg exchanges] failed: {e}")
-            self._dex_exchange_ids = set()
+            print(f"[cg exchanges] outer error: {e}")
+        self._dex_exchange_ids = ids
+        print(f"[cg exchanges] {len(ids)} DEX exchange IDs loaded")
 
     async def _fetch_coinglass_coins_markets(self) -> None:
         try:
