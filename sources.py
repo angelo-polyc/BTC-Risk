@@ -525,9 +525,10 @@ class SourceAPI:
                 r = await self._llama_get(f"/summary/dexs/{slug}")
                 return r.get("total24h")
             except httpx.HTTPStatusError as e:
-                if e.response.status_code != 404:
+                if e.response.status_code >= 500:
                     raise
-                # 404: slug is not a DEX protocol → fall through to chain
+                # any 4xx (404 = slug unknown, 400 = slug is a chain not a DEX protocol)
+                # → fall through to chain endpoint
         if dex_chain:
             try:
                 r = await self._llama_get(f"/overview/dexs/{dex_chain}")
@@ -547,9 +548,9 @@ class SourceAPI:
                 r = await self._llama_get(f"/summary/dexs/{slug}?dataType=dailyVolume")
                 return r.get("totalDataChart") or []
             except httpx.HTTPStatusError as e:
-                if e.response.status_code != 404:
+                if e.response.status_code >= 500:
                     raise
-                # 404: slug is not a DEX protocol → fall through to chain
+                # any 4xx → fall through to chain endpoint
         if dex_chain:
             try:
                 r = await self._llama_get(f"/overview/dexs/{dex_chain}?dataType=dailyVolume")
