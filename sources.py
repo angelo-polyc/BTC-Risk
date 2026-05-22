@@ -20,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import re
 import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -43,6 +44,15 @@ ALLOWED_CEX: set[str] = {
     "Bitstamp by Robinhood", "HashKey Exchange", "Backpack Exchange", "Binance US",
     "BitMEX", "Bithumb", "Bybit EU", "Hyperliquid",
 }
+
+# DEX patterns for spot-volume filtering — exchange identifier (not name) contains one of these.
+# Used to identify green-trust DEX tickers without depending on a runtime API fetch.
+DEX_PATTERN = re.compile(
+    r"(uniswap|pancakeswap|curve|raydium|aerodrome|velodrome|sushiswap|quickswap|meteora"
+    r"|camelot|traderjoe|orca|whirlpool|lifinity|balancer|kyberswap|maverick|thruster"
+    r"|syncswap|horizondex|woofi|perpetual|pancake|sunswap|justusd|sunio)",
+    re.I,
+)
 
 # DefiLlama slug overrides for known edge cases (CG-id → DefiLlama slug)
 SLUG_OVERRIDES: dict[str, str] = {
@@ -100,7 +110,6 @@ class SourceAPI:
         self._llama_protocols: dict[str, str] = {}   # CG-id → DefiLlama slug
         self._cglass_supported: set[str] = set()     # symbols Coinglass tracks
         self._price_cache: dict[str, float] = {}     # CG-id → price USD (batched)
-        self._dex_exchange_ids: set[str] = set()     # exchange IDs that are DEXes (from /exchanges)
         self._tickers_sem = asyncio.Semaphore(3)     # throttle concurrent tickers calls
 
     # -- lifecycle --
@@ -126,8 +135,7 @@ class SourceAPI:
 
     async def prep_run(self, token_ids: list[str] | None = None) -> None:
         """Pre-fetch shared caches. Call BEFORE iterating per-token.
-        Pass token_ids to batch-fetch prices (saves ~291 individual CG calls).
-        First call (no token_ids) also loads the DEX exchange ID set."""
+        Pass token_ids to batch-fetch prices (saves ~291 individual CG calls)."""
         tasks = [
             self._fetch_coinglass_coins_markets(),
             self._fetch_coinglass_supported(),
@@ -135,8 +143,6 @@ class SourceAPI:
         ]
         if token_ids:
             tasks.append(self._batch_fetch_prices(token_ids))
-        else:
-            tasks.append(self._fetch_dex_exchange_ids())
         await asyncio.gather(*tasks)
 
     async def _batch_fetch_prices(self, token_ids: list[str]) -> None:
@@ -152,32 +158,6 @@ class SourceAPI:
                         self._price_cache[cg_id] = data["usd"]
             except Exception as e:
                 print(f"[cg batch prices] batch {i}: {e}")
-
-    async def _fetch_dex_exchange_ids(self) -> None:
-        """Paginate /exchanges and build a set of DEX exchange IDs.
-        DEX = country is None (DEXes are non-custodial; CG always sets country for CEXes).
-        Partial results are kept if a late page fails."""
-        ids: set[str] = set()
-        try:
-            for page in range(1, 20):
-                try:
-                    r = await self._cg_get("/exchanges", params={"per_page": 250, "page": page})
-                except Exception as page_err:
-                    print(f"[cg exchanges] page {page} failed: {page_err}")
-                    break
-                if not r:
-                    break
-                for e in r:
-                    eid = e.get("id", "")
-                    country = e.get("country")
-                    if eid and country is None:
-                        ids.add(eid)
-                if len(r) < 250:
-                    break
-        except Exception as e:
-            print(f"[cg exchanges] outer error: {e}")
-        self._dex_exchange_ids = ids
-        print(f"[cg exchanges] {len(ids)} DEX exchange IDs loaded")
 
     async def _fetch_coinglass_coins_markets(self) -> None:
         try:
@@ -424,8 +404,8 @@ class SourceAPI:
     async def _cg_filtered_volume(self, token_id: str) -> tuple[float | None, float | None]:
         """Returns (spot_vol_usd, dex_vol_usd) from a single tickers call.
         spot_vol = CEX allowlist + DEX tickers.
-        dex_vol  = DEX tickers only (exchange ID set built at startup via country=None filter).
-        Note: CG Pro API returns trust_score=null in tickers — do not filter on it."""
+        dex_vol  = DEX tickers only (matched by DEX_PATTERN on exchange identifier).
+        Note: CG Pro API returns trust_score=null — we do NOT filter on trust_score here."""
         async with self._tickers_sem:
             r = await self._cg_get(f"/coins/{token_id}/tickers",
                                     params={"depth": "false", "include_exchange_logo": "false"})
@@ -439,7 +419,7 @@ class SourceAPI:
                     continue
                 if market_name in ALLOWED_CEX:
                     spot_total += usd_vol
-                elif market_id in self._dex_exchange_ids:
+                elif DEX_PATTERN.search(market_id or ""):
                     spot_total += usd_vol
                     dex_total += usd_vol
         return spot_total or None, dex_total or None
