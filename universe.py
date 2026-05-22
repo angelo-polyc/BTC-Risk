@@ -48,6 +48,100 @@ WRAPPED_IDS: set[str] = {
     "wrapped-eeth", "wrapped-beacon-eth",
 }
 
+# Manually curated exclusions: low-signal, illiquid, or out-of-scope tokens.
+PRESET_EXCLUDED_IDS: set[str] = {
+    # Tokenized funds / RWA
+    "superstate-short-duration-us-government-securities-fund-ustb",  # USTB
+    "eutbl",                                        # EUTBL
+    "spiko-amundi-overnight-swap-fund-eur",         # EURSAFO
+    "spiko-us-t-bills-money-market-fund",           # USTBL
+    "theo-short-duration-us-treasury-fund",         # THBILL
+    "apollo-diversified-credit-securitize-fund",    # ACRED
+    "securitize-tokenized-aaa-clo-fund",            # STAC
+    "fidelity-digital-interest-token",              # FDIT
+    "circle-internet-group-ondo-tokenized-stock",   # CRCLON
+    "strategy-pp-variable-xstock",                  # STRCX
+    # Tradable platform tokens (PC prefixes)
+    "tradable-singapore-fintech-ssl",               # PC0000077
+    "tradable-latam-middle-market-lender-sstl",     # PC0000085
+    "tradable-na-third-party-online-merchant-sstn", # PC0000015
+    "tradable-apac-diversified-finance-provider-sstn", # PC0000033
+    "tradable-na-rent-financing-platform-sstn",     # PC0000031
+    "tradable-latam-fintech-sstn",                  # PC0000097
+    "tradable-singapore-fintech-ssl-2",             # PC0000023
+    # Exchange tokens with no derivatives coverage
+    "whitebit",                                     # WBT
+    "mx-token",                                     # MX
+    "btse-token",                                   # BTSE
+    "tokenize-xchange",                             # TKX
+    "bnb48-club-token",                             # KOGE
+    # Low-signal / meme / illiquid
+    "memecore",                                     # M
+    "bianrensheng",                                 # 币安人生
+    "ribbita-by-virtuals",                          # TIBBIR
+    "banana-for-scale-2",                           # BANANAS31
+    "yooldo-games",                                 # ESPORTS
+    "troll-2",                                      # TROLL
+    "sosovalue",                                    # SOSO
+    "gmt-token",                                    # GOMINING
+    "ozone-chain",                                  # OZO
+    "asteroid-shiba",                               # ASTEROID
+    "wemix-token",                                  # WEMIX
+    "vaulta",                                       # A
+    "safo",                                         # SAFO
+    "newton-project",                               # AB
+    "tagger",                                       # TAG
+    "golem",                                        # GLM
+    "safepal",                                      # SFP
+    "cheems-token",                                 # CHEEMS
+    "ecash",                                        # XEC
+    "gala",                                         # GALA
+    "zano",                                         # ZANO
+    "vision-3",                                     # VSN
+    "onyc",                                         # ONYC
+    "chain-2",                                      # XCN
+    "undeads-games",                                # UDS
+    "billions-network",                             # BILL
+    "trust-wallet-token",                           # TWT
+    "neo",                                          # NEO
+    "pieverse",                                     # PIEVERSE
+    "apyusd",                                       # APYUSD
+    "block-street",                                 # BSB
+    "ultima",                                       # ULTIMA
+    "reallink",                                     # REAL
+    "ape-and-pepe",                                 # APEPE
+    "audiera",                                      # BEAT
+    "nexus-4",                                      # NEX
+    "unibase",                                      # UB
+    "skyai",                                        # SKYAI
+    "build-on",                                     # B
+    "apenft",                                       # NFT
+    "olympus",                                      # OHM
+    "kinesis-silver",                               # KAG
+    "jasmycoin",                                    # JASMY
+    "decred",                                       # DCR
+    "the9bit",                                      # 9BIT
+    "hastra-prime",                                 # PRIME
+    "usdgo",                                        # USDGO
+    "kinesis-gold",                                 # KAU
+    "lab",                                          # LAB
+    "siren-2",                                      # SIREN
+    "sun-token",                                    # SUN
+    "adi-token",                                    # ADI
+    "ousg",                                         # OUSG
+    "xdce-crowd-sale",                              # XDC
+    "beldex",                                       # BDX
+    "flare-networks",                               # FLR
+    "gatechain-token",                              # GT
+    "just",                                         # JST
+    "blockchain-capital",                           # BCAP
+    "wefi",                                         # WFI
+    "figure-heloc",                                 # FIGR_HELOC
+    "lido-earn-eth",                                # EARNETH
+    "rain",                                         # RAIN
+    "nexo",                                         # NEXO
+}
+
 # CG ID → DefiLlama chain slug.
 # Used for BOTH chain TVL (/v2/historicalChainTvl/{chain})
 # and chain DEX vol (/overview/dexs/{chain}).
@@ -96,11 +190,9 @@ CHAIN_MAP: dict[str, str] = {
     "elrond":                   "Elrond",       # $19M (MultiversX)
     "iota":                     "IOTA",         # $13.8M
     "chiliz":                   "Chiliz",       # $4.1M
-    "neo":                      "NEO",          # $4.0M
     "apecoin":                  "ApeChain",     # $3.5M
     "zcash":                    "Zcash",        # $2.7M
     "litecoin":                 "Litecoin",     # $2.2M
-    "gala":                     "Gala",         # $7.1M
     "linea":                    "Linea",        # $53.9M
     "ripple":                   "Ripple",       # $47.5M
     "dydx":                     "dYdX",         # $99M — dYdX is a chain, not a protocol
@@ -109,8 +201,6 @@ CHAIN_MAP: dict[str, str] = {
     # Tokens whose gecko_id matches a bridge/protocol slug — override to chain:
     "starknet":                 "Starknet",
     # Tokens with protocol slugs returning $0 — chain endpoint has real TVL:
-    "flare-networks":           "Flare",        # slug=flare → $0; chain → $154M
-    "xdce-crowd-sale":          "XDC",          # slug → $0; chain → $4.7M
     "vechain":                  "VeChain",      # $1.6M
     "conflux-token":            "Conflux",      # $7.6M
     "kaia":                     "Kaia",         # $13.4M
@@ -151,13 +241,10 @@ SLUG_OVERRIDES: dict[str, str] = {
     "htx-dao":                      "htx",                  # $5.61B
     "kucoin-shares":                "kucoin",               # $2.71B
     "pax-gold":                     "paxos-gold",           # $2.12B
-    "blockchain-capital":           "blockchain-capital",   # $963M
     # Protocol slugs from audit
     "centrifuge":                   "centrifuge-protocol",  # $1.48B (was missing from overrides)
-    "figure-heloc":                 "figure-markets-exchange", # $1.40B
     "jito-governance":              "jito-liquid-staking",  # $877M
     "aster-2":                      "aster-bridge",         # $873M
-    "olympus":                      "cooler-loans",         # $219M (olympus-dao is $0, cooler-loans is active)
     "lighter":                      "lighter-bridge",       # $496M
     "pump-fun":                     "pumpswap",             # $243M
     "doublezero":                   "doublezero-staked-sol", # $619M
@@ -266,7 +353,7 @@ async def resolve_universe(
                 _fetch_defillama_protocols(client),
             )
 
-    excluded_ids |= STABLE_IDS | RWA_IDS | WRAPPED_IDS
+    excluded_ids |= STABLE_IDS | RWA_IDS | WRAPPED_IDS | PRESET_EXCLUDED_IDS
 
     out: list[Token] = []
     for c in markets[:top_n]:
