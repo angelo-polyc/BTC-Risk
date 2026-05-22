@@ -105,7 +105,7 @@ async def run_ingest() -> None:
         )
         print(f"[ingest] universe size: {len(universe)}")
 
-        await api.prep_run(token_ids=[t.id for t in universe])
+        await api._batch_fetch_prices([t.id for t in universe])
 
         sem = asyncio.Semaphore(20)
 
