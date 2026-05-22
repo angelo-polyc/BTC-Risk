@@ -107,7 +107,7 @@ async def run_ingest() -> None:
 
         await api.prep_run(token_ids=[t.id for t in universe])
 
-        sem = asyncio.Semaphore(8)
+        sem = asyncio.Semaphore(20)
 
         async def pull(t):
             out = {
