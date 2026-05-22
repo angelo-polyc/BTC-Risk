@@ -140,6 +140,7 @@ PRESET_EXCLUDED_IDS: set[str] = {
     "lido-earn-eth",                                # EARNETH
     "rain",                                         # RAIN
     "nexo",                                         # NEXO
+    "celestia",                                     # TIA
 }
 
 # CG ID → DefiLlama chain slug.
@@ -180,7 +181,6 @@ CHAIN_MAP: dict[str, str] = {
     "internet-computer":        "ICP",
     "cosmos":                   "CosmosHub",
     "algorand":                 "Algorand",
-    "celestia":                 "Celestia",
     "monad":                    "Monad",
     "story-2":                  "Story",
     "plasma":                   "Plasma",
