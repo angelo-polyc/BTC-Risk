@@ -72,26 +72,35 @@ CHAIN_MAP: dict[str, str] = {
     "polygon-ecosystem-token":  "polygon",
     "celo":                     "celo",
     "kava":                     "kava",
-    "mantle":                   "mantle",
-    "crypto-com-chain":         "cronos",
-    "coredaoorg":               "core",
-    "core-dao":                 "core",
-    "zksync":                   "zksync era",   # space required
-    "blockstack":               "stacks",
-    "metis-token":              "metis",
-    "cardano":                  "cardano",
-    "immutable-x":              "immutablex",
-    "hedera-hashgraph":         "hedera",
-    "polkadot":                 "polkadot",
-    "internet-computer":        "icp",
-    "cosmos":                   "cosmos",
-    "algorand":                 "algorand",
-    "celestia":                 "celestia",
-    "monad":                    "monad",
-    "story-2":                  "story",
-    "plasma":                   "plasma",
+    "mantle":                   "Mantle",
+    "crypto-com-chain":         "Cronos",
+    "coredaoorg":               "Core",
+    "core-dao":                 "Core",
+    "zksync":                   "zkSync Era",
+    "blockstack":               "Stacks",
+    "metis-token":              "Metis",
+    "cardano":                  "Cardano",
+    "immutable-x":              "Immutable X",
+    "hedera-hashgraph":         "Hedera",
+    "polkadot":                 "Polkadot",
+    "internet-computer":        "ICP",
+    "cosmos":                   "CosmosHub",
+    "algorand":                 "Algorand",
+    "celestia":                 "Celestia",
+    "monad":                    "Monad",
+    "story-2":                  "Story",
+    "plasma":                   "Plasma",
     # Tokens whose gecko_id matches a bridge/protocol slug — override to chain:
-    "starknet":                 "starknet",     # was matching to "starknet-bridge"
+    "starknet":                 "Starknet",
+    # Tokens with protocol slugs returning $0 — chain endpoint has real TVL:
+    "flare-networks":           "Flare",        # slug=flare → $0; chain → $154M
+    "xdce-crowd-sale":          "XDC",          # slug → $0; chain → $4.7M
+    "vechain":                  "VeChain",      # $1.6M
+    "conflux-token":            "Conflux",      # $7.6M
+    "kaia":                     "Kaia",         # $13.4M
+    "tezos":                    "Tezos",        # $28.5M
+    "filecoin":                 "Filecoin",     # $5.0M
+    "gnosis":                   "xDai",         # gnosis slug → 400; chain → real TVL
 }
 
 # CG ID → correct DefiLlama protocol slug.
@@ -112,7 +121,6 @@ SLUG_OVERRIDES: dict[str, str] = {
     "hyperliquid":                  "hyperliquid",     # was matching to hyperliquid-bridge
     "ondo-finance":                 "ondo-finance",    # was matching to ondo-yield-assets
     "sky":                          "sky",             # was matching to sky-lending
-    "gnosis":                       "gnosis",
     "thorchain":                    "thorchain",       # was "thorchain-dex"
     "dydx":                         "dydx",            # gecko_id mismatch in llama
     "pendle":                       "pendle",
@@ -129,6 +137,9 @@ SLUG_OVERRIDES: dict[str, str] = {
     "liquity":                      "liquity",
     "1inch":                        "1inch",
     "frax-share":                   "frax",
+    # Fixable gaps
+    "morpho":                       "morpho-blue",  # morpho slug → $0; morpho-blue → $7.43B
+    "virtuals-protocol":            "virtuals-protocol",
 }
 
 

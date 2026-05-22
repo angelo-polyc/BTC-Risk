@@ -505,16 +505,22 @@ class SourceAPI:
         return r.json()
 
     async def _llama_protocol_tvl(self, slug: str) -> float | None:
-        """Latest TVL for a DeFi protocol via /protocol/{slug}."""
+        """Latest TVL for a DeFi protocol via /protocol/{slug}.
+        Reads the top-level tvl array (consistent with history method).
+        Falls back to currentChainTvls snapshot for staking-only protocols
+        where the tvl series is empty (e.g. VVV, VIRTUAL, LINK staking)."""
         r = await self._llama_get(f"/protocol/{slug}")
-        chain_tvls = r.get("chainTvls") or {}
-        total = 0.0
-        for chain_data in chain_tvls.values():
-            tvl_series = chain_data.get("tvl", [])
-            if tvl_series:
-                latest = tvl_series[-1]
-                total += latest.get("totalLiquidityUSD") or 0
-        return total or None
+        tvl_series = r.get("tvl") or []
+        if tvl_series:
+            val = tvl_series[-1].get("totalLiquidityUSD")
+            if val:
+                return float(val)
+        # Staking-only protocols have an empty tvl array but non-zero currentChainTvls
+        current = r.get("currentChainTvls") or {}
+        if current:
+            total = sum(float(v) for v in current.values() if isinstance(v, (int, float)))
+            return total or None
+        return None
 
     async def _llama_chain_tvl(self, chain_name: str) -> float | None:
         """Latest TVL for an L1/L2 chain via /v2/historicalChainTvl/{chain}."""
