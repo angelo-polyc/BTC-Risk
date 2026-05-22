@@ -305,7 +305,7 @@ CHAIN_MAP: dict[str, str] = {
     "the-open-network":         "ton",
     "near":                     "near",
     "arbitrum":                 "arbitrum",
-    "optimism":                 "Optimism",
+    "optimism":                 "OP Mainnet",
     "aptos":                    "aptos",
     "sui":                      "sui",
     "fantom":                   "fantom",
@@ -340,8 +340,8 @@ CHAIN_MAP: dict[str, str] = {
     "osmosis":                  "Osmosis",
     "taiko":                    "Taiko",
     "dymension":                "Dymension",
-    "mina-protocol":            "Mina",
-    "axelar":                   "Axelar",
+    # mina-protocol: not tracked as a chain on DefiLlama
+    # axelar: cross-chain messaging layer, no chain TVL on DefiLlama
     # Additional chains confirmed by DefiLlama agent audit
     "stellar":                  "Stellar",
     "worldcoin-wld":            "World Chain",
@@ -365,7 +365,7 @@ CHAIN_MAP: dict[str, str] = {
     "kaia":                     "Kaia",
     "tezos":                    "Tezos",
     "filecoin":                 "Filecoin",
-    "gnosis":                   "xDai",
+    "gnosis":                   "Gnosis",       # xDai is dead (404); Gnosis = $73M
 }
 
 # CG ID → correct DefiLlama protocol slug.
