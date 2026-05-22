@@ -101,6 +101,7 @@ class SourceAPI:
 
         self._cglass_today: dict[str, dict] = {}
         self._llama_protocols: dict[str, str] = {}
+        self._llama_chains: dict[str, float] = {}   # chain_name → current TVL
         self._cglass_supported: set[str] = set()
         self._price_cache: dict[str, float] = {}
         self._tickers_sem = asyncio.Semaphore(3)
@@ -128,6 +129,7 @@ class SourceAPI:
             self._fetch_coinglass_coins_markets(),
             self._fetch_coinglass_supported(),
             self._fetch_defillama_protocols(),
+            self._fetch_llama_chains(),
         ]
         if token_ids:
             tasks.append(self._batch_fetch_prices(token_ids))
@@ -176,6 +178,21 @@ class SourceAPI:
         except Exception as e:
             print(f"[sources] defillama protocols failed: {e}")
             self._llama_protocols = {}
+
+    async def _fetch_llama_chains(self) -> None:
+        """Bulk-fetch current TVL for all chains in one call. Much faster than
+        per-chain /v2/historicalChainTvl calls during daily ingest."""
+        try:
+            r = await self.client.get(f"{LLAMA_BASE}/v2/chains", timeout=30)
+            r.raise_for_status()
+            self._llama_chains = {
+                c["name"]: float(c.get("tvl") or 0)
+                for c in r.json() if c.get("name")
+            }
+            print(f"[sources] llama chains cache: {len(self._llama_chains)} chains")
+        except Exception as e:
+            print(f"[sources] defillama chains failed: {e}")
+            self._llama_chains = {}
 
     def coinglass_supports(self, symbol: str) -> bool:
         return symbol.upper() in self._cglass_supported
@@ -551,25 +568,40 @@ class SourceAPI:
         return r.json()
 
     async def _llama_protocol_tvl(self, slug: str) -> float | None:
-        """Latest TVL for a DeFi protocol via /protocol/{slug}.
-        Reads the top-level tvl array (consistent with history method).
-        Falls back to currentChainTvls snapshot for staking-only protocols
-        where the tvl series is empty (e.g. VVV, VIRTUAL, LINK staking)."""
-        r = await self._llama_get(f"/protocol/{slug}")
-        tvl_series = r.get("tvl") or []
-        if tvl_series:
-            val = tvl_series[-1].get("totalLiquidityUSD")
-            if val:
-                return float(val)
-        # Staking-only protocols have an empty tvl array but non-zero currentChainTvls
-        current = r.get("currentChainTvls") or {}
-        if current:
-            total = sum(float(v) for v in current.values() if isinstance(v, (int, float)))
-            return total or None
+        """Current TVL for a DeFi protocol via /tvl/{slug} (returns single float).
+        Fast — no historical data downloaded. Falls back to /protocol/{slug}
+        only if the lightweight endpoint fails."""
+        try:
+            r = await self.client.get(f"{LLAMA_BASE}/tvl/{slug}", timeout=15)
+            if r.status_code == 200:
+                val = float(r.text.strip())
+                return val if val > 0 else None
+        except Exception:
+            pass
+        # Fallback: full protocol endpoint (slower, handles staking-only edge cases)
+        try:
+            r = await self._llama_get(f"/protocol/{slug}")
+            tvl_series = r.get("tvl") or []
+            if tvl_series:
+                val = tvl_series[-1].get("totalLiquidityUSD")
+                if val:
+                    return float(val)
+            current = r.get("currentChainTvls") or {}
+            if current:
+                total = sum(float(v) for v in current.values() if isinstance(v, (int, float)))
+                return total or None
+        except Exception:
+            pass
         return None
 
     async def _llama_chain_tvl(self, chain_name: str) -> float | None:
-        """Latest TVL for an L1/L2 chain via /v2/historicalChainTvl/{chain}."""
+        """Current TVL for an L1/L2 chain. Uses bulk chains cache (populated in
+        prep_run) — no per-chain API call needed during ingest."""
+        for name in (chain_name, chain_name.title()):
+            val = self._llama_chains.get(name)
+            if val:
+                return float(val)
+        # Cache miss — fall back to historical endpoint (backfill path)
         for name in (chain_name, chain_name.title()):
             try:
                 r = await self._llama_get(f"/v2/historicalChainTvl/{name}")
