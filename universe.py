@@ -119,8 +119,16 @@ SLUG_OVERRIDES: dict[str, str] = {
     "aerodrome-finance":            "aerodrome",
     "velodrome-finance":            "velodrome",
     "balancer":                     "balancer",
-    "sushi":                        "sushi",
+    "sushi":                        "sushiswap",
     "convex-finance":               "convex-finance",
+    # Parent slugs absent from /protocols but accessible at /protocol/{slug}
+    "maker":                        "makerdao",
+    "yearn-finance":                "yearn-finance",
+    "synthetix-network-token":      "synthetix",
+    "havven":                       "synthetix",    # alt gecko_id for SNX
+    "liquity":                      "liquity",
+    "1inch":                        "1inch",
+    "frax-share":                   "frax",
 }
 
 
