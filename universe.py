@@ -1,4 +1,4 @@
-"""Resolve top-300, apply exclusions, attach DefiLlama slug + Coinglass coverage flag."""
+"""Resolve universe, attach DefiLlama slug + Coinglass coverage flag."""
 from __future__ import annotations
 
 import asyncio
@@ -95,7 +95,6 @@ PRESET_EXCLUDED_IDS: set[str] = {
     "safepal",                                      # SFP
     "cheems-token",                                 # CHEEMS
     "ecash",                                        # XEC
-    "gala",                                         # GALA
     "zano",                                         # ZANO
     "vision-3",                                     # VSN
     "onyc",                                         # ONYC
@@ -138,9 +137,158 @@ PRESET_EXCLUDED_IDS: set[str] = {
     "wefi",                                         # WFI
     "figure-heloc",                                 # FIGR_HELOC
     "lido-earn-eth",                                # EARNETH
-    "rain",                                         # RAIN
     "nexo",                                         # NEXO
-    "celestia",                                     # TIA
+}
+
+# Tokens to always include regardless of CG rank.
+# Used for watchlist tokens that may fall outside top-300 and for
+# the daily-analysis presets that are excluded from the top-300 fetch
+# via exclude_tokens (they bypass that check via the pinned path).
+PINNED_IDS: set[str] = {
+    # Daily-analysis presets — include in divergence scanner too
+    "bitcoin",          # BTC
+    "ethereum",         # ETH
+    "solana",           # SOL
+    "hyperliquid",      # HYPE
+    "syrup",            # SYRUP
+    "ether-fi",         # ETHFI
+    "ethena",           # ENA
+    "grass",            # GRASS
+    "bittensor",        # TAO
+    "creator-chain",    # CC
+    "berachain-bera",   # BERA
+    "aleo",             # ALEO
+    # Restored from PRESET_EXCLUDED_IDS — user wants these back
+    "gala",             # GALA
+    "rain",             # RAIN
+    "shuffle-2",        # SHFL
+    "celestia",         # TIA
+    # New watchlist tokens (may be outside top-300)
+    "act-i-the-ai-prophecy",    # ACT
+    "across-protocol",          # ACX
+    "aevo-exchange",            # AEVO
+    "aixbt",                    # AIXBT
+    "alt",                      # ALT
+    "ao-computer",              # AO
+    "ai-rig-complex",           # ARC
+    "arkham",                   # ARKM
+    "avail",                    # AVAIL
+    "axelar",                   # AXL
+    "b3",                       # B3
+    "a-fund-baby",              # BABY
+    "balancer",                 # BAL
+    "banana",                   # BANANA (Banana Gun)
+    "lombard-protocol",         # BARD
+    "bio-protocol",             # BIO
+    "blast",                    # BLAST
+    "bluefin",                  # BLUE
+    "blur",                     # BLUR
+    "collector-crypt",          # CARDS
+    "ceto",                     # CELO (via chain map)
+    "cetus-protocol",           # CETUS
+    "chip-2",                   # CHIP
+    "tokenbot-2",               # CLANKER
+    "coredaoorg",               # CORE (via chain map)
+    "clearpool",                # CPOOL
+    "cysic",                    # CYS
+    "debridge",                 # DBR
+    "deep",                     # DEEP
+    "degen-base",               # DEGEN
+    "deus-finance-2",           # DEUS
+    "drift-protocol",           # DRIFT
+    "derive",                   # DRV
+    "dymension",                # DYM
+    "euler",                    # EUL
+    "ftx-token",                # FTT
+    "g-token",                  # G
+    "geodnet",                  # GEOD
+    "goldfinch",                # GFI
+    "gmx",                      # GMX
+    "goatseus-maximus",         # GOAT
+    "honey-3",                  # HONEY
+    "illuvium",                 # ILV
+    "initia",                   # INIT
+    "infinex-2",                # INX
+    "io",                       # IO
+    "kinetiq",                  # KNTQ
+    "layer3",                   # L3
+    "lagrange",                 # LA
+    "solayer",                  # LAYER
+    "liquity",                  # LQTY
+    "terra-luna-2",             # LUNA
+    "magic",                    # MAGIC
+    "mask-network",             # MASK
+    "maverick-protocol",        # MAV
+    "magic-eden",               # ME
+    "megaeth",                  # MEGA
+    "meteora",                  # MET
+    "meta-2-2",                 # META
+    "mina-protocol",            # MINA
+    "moo-deng",                 # MOODENG
+    "morpheusai",               # MOR
+    "movement",                 # MOVE
+    "metaplex",                 # MPLX
+    "natix-network",            # NATIX
+    "neon",                     # NEON
+    "nillion",                  # NIL
+    "notcoin",                  # NOT
+    "suins-token",              # NS
+    "nexpace",                  # NXPC
+    "nym",                      # NYM
+    "autonolas",                # OLAS
+    "mantra-dao",               # OM
+    "omni-network",             # OMNI
+    "opengradient",             # OPG
+    "orca",                     # ORCA
+    "osmosis",                  # OSMO
+    "paal-ai",                  # PAAL
+    "peaq-2",                   # PEAQ
+    "pippin",                   # PIPPIN
+    "plume",                    # PLUME
+    "peanut-the-squirrel",      # PNUT
+    "polymath",                 # POLY
+    "popcat",                   # POPCAT
+    "puffer-finance",           # PUFFER
+    "redstone-oracles",         # RED
+    "retardio",                 # RETARDIO
+    "renzo",                    # REZ
+    "rollbit-coin",             # RLB
+    "robo-token-2",             # ROBO
+    "ronin",                    # RON
+    "rocket-pool",              # RPL
+    "saga-2",                   # SAGA
+    "scroll",                   # SCR
+    "myshell",                  # SHELL
+    "sign-global",              # SIGN
+    "status",                   # SNT
+    "solv-protocol",            # SOLV
+    "sophon",                   # SOPH
+    "spectral",                 # SPEC
+    "spark-2",                  # SPK
+    "subsquid",                 # SQD
+    "ssv-network",              # SSV
+    "stargate-finance",         # STG
+    "sushi",                    # SUSHI
+    "sweatcoin",                # SWEAT
+    "swell-network",            # SWELL
+    "space-and-time",           # SXT
+    "taiko",                    # TAIKO
+    "tensor",                   # TNSR
+    "tornado-cash",             # TORN
+    "union-2",                  # U
+    "uma",                      # UMA
+    "usual",                    # USUAL
+    "vana",                     # VANA
+    "w-2",                      # W (Wormhole)
+    "connect-token-wct",        # WCT
+    "humidifi",                 # WET
+    "xai-blockchain",           # XAI
+    "anoma",                    # XAN
+    "yearn-finance",            # YFI
+    "yield-guild-games",        # YGG
+    "ynesnoerror",              # YNE
+    "zerebro",                  # ZEREBRO
+    "0x",                       # ZRX
 }
 
 # CG ID → DefiLlama chain slug.
@@ -150,6 +298,8 @@ PRESET_EXCLUDED_IDS: set[str] = {
 # preventing wrong gecko_id matches (bridge/protocol entries).
 CHAIN_MAP: dict[str, str] = {
     "binancecoin":              "bsc",
+    "ethereum":                 "Ethereum",
+    "solana":                   "Solana",
     "avalanche-2":              "avalanche",
     "tron":                     "tron",
     "the-open-network":         "ton",
@@ -184,29 +334,37 @@ CHAIN_MAP: dict[str, str] = {
     "monad":                    "Monad",
     "story-2":                  "Story",
     "plasma":                   "Plasma",
+    "berachain-bera":           "Berachain",
+    "ronin":                    "Ronin",
+    "blast":                    "Blast",
+    "osmosis":                  "Osmosis",
+    "taiko":                    "Taiko",
+    "dymension":                "Dymension",
+    "mina-protocol":            "Mina",
+    "axelar":                   "Axelar",
     # Additional chains confirmed by DefiLlama agent audit
-    "stellar":                  "Stellar",      # $168M
-    "worldcoin-wld":            "World Chain",  # $38.7M
-    "elrond":                   "Elrond",       # $19M (MultiversX)
-    "iota":                     "IOTA",         # $13.8M
-    "chiliz":                   "Chiliz",       # $4.1M
-    "apecoin":                  "ApeChain",     # $3.5M
-    "zcash":                    "Zcash",        # $2.7M
-    "litecoin":                 "Litecoin",     # $2.2M
-    "linea":                    "Linea",        # $53.9M
-    "ripple":                   "Ripple",       # $47.5M
-    "dydx":                     "dYdX",         # $99M — dYdX is a chain, not a protocol
-    "provenance-blockchain":    "Provenance",   # $1.44B (HASH token)
-    "hash-2":                   "Provenance",   # alt CG ID for HASH
+    "stellar":                  "Stellar",
+    "worldcoin-wld":            "World Chain",
+    "elrond":                   "Elrond",
+    "iota":                     "IOTA",
+    "chiliz":                   "Chiliz",
+    "apecoin":                  "ApeChain",
+    "zcash":                    "Zcash",
+    "litecoin":                 "Litecoin",
+    "linea":                    "Linea",
+    "ripple":                   "Ripple",
+    "dydx":                     "dYdX",
+    "provenance-blockchain":    "Provenance",
+    "hash-2":                   "Provenance",
     # Tokens whose gecko_id matches a bridge/protocol slug — override to chain:
     "starknet":                 "Starknet",
     # Tokens with protocol slugs returning $0 — chain endpoint has real TVL:
-    "vechain":                  "VeChain",      # $1.6M
-    "conflux-token":            "Conflux",      # $7.6M
-    "kaia":                     "Kaia",         # $13.4M
-    "tezos":                    "Tezos",        # $28.5M
-    "filecoin":                 "Filecoin",     # $5.0M
-    "gnosis":                   "xDai",         # gnosis slug → 400; chain → real TVL
+    "vechain":                  "VeChain",
+    "conflux-token":            "Conflux",
+    "kaia":                     "Kaia",
+    "tezos":                    "Tezos",
+    "filecoin":                 "Filecoin",
+    "gnosis":                   "xDai",
 }
 
 # CG ID → correct DefiLlama protocol slug.
@@ -216,53 +374,69 @@ SLUG_OVERRIDES: dict[str, str] = {
     "ether-fi":                     "ether.fi",
     "syrup":                        "maple-finance",
     "uniswap":                      "uniswap",
-    "aave":                         "aave",            # was matching to aave-v2 only
+    "aave":                         "aave",
     "curve-dao-token":              "curve-dex",
     "pancakeswap-token":            "pancakeswap",
     "lido-dao":                     "lido",
     "compound-governance-token":    "compound-v3",
     "raydium":                      "raydium",
-    "jupiter-exchange-solana":      "jupiter",         # was matching to jupiter-lend
+    "jupiter-exchange-solana":      "jupiter",
     "gmx":                          "gmx",
-    "hyperliquid":                  "hyperliquid",     # was matching to hyperliquid-bridge
-    "ondo-finance":                 "ondo-finance",    # was matching to ondo-yield-assets
-    "sky":                          "sky",             # was matching to sky-lending
-    "thorchain":                    "thorchain-dex",       # was "thorchain-dex"
-        "pendle":                       "pendle",
+    "hyperliquid":                  "hyperliquid",
+    "ondo-finance":                 "ondo-finance",
+    "sky":                          "sky",
+    "thorchain":                    "thorchain-dex",
+    "pendle":                       "pendle",
     "aerodrome-finance":            "aerodrome",
     "velodrome-finance":            "velodrome",
     "balancer":                     "balancer",
     "sushi":                        "sushiswap",
     "convex-finance":               "convex-finance",
-    # Parent slugs absent from /protocols but accessible at /protocol/{slug}
     # Exchange tokens — large TVL via exchange protocol slugs
-    "leo-token":                    "bitfinex",             # $18.67B
-    "bitget-token":                 "bitget",               # $5.73B
-    "htx-dao":                      "htx",                  # $5.61B
-    "kucoin-shares":                "kucoin",               # $2.71B
-    "pax-gold":                     "paxos-gold",           # $2.12B
+    "leo-token":                    "bitfinex",
+    "bitget-token":                 "bitget",
+    "htx-dao":                      "htx",
+    "kucoin-shares":                "kucoin",
+    "pax-gold":                     "paxos-gold",
     # Protocol slugs from audit
-    "centrifuge":                   "centrifuge-protocol",  # $1.48B (was missing from overrides)
-    "jito-governance":              "jito-liquid-staking",  # $877M
-    "aster-2":                      "aster-bridge",         # $873M
-    "lighter":                      "lighter-bridge",       # $496M
-    "pump-fun":                     "pumpswap",             # $243M
-    "doublezero":                   "doublezero-staked-sol", # $619M
-    "chainlink":                    "stake.link-liquid",    # $68.5M (chainlink itself has no TVL)
-    "shiba-inu":                    "shibaswap-v1",         # $5.7M
-    "bonk":                         "bonk-staked-sol",      # $12.1M
-    "deltaprime":                   "deltaprime",           # $4.3M
-    "river-omni":                   "river-omni-cdp",       # $136M
+    "centrifuge":                   "centrifuge-protocol",
+    "jito-governance":              "jito-liquid-staking",
+    "aster-2":                      "aster-bridge",
+    "lighter":                      "lighter-bridge",
+    "pump-fun":                     "pumpswap",
+    "doublezero":                   "doublezero-staked-sol",
+    "chainlink":                    "stake.link-liquid",
+    "shiba-inu":                    "shibaswap-v1",
+    "bonk":                         "bonk-staked-sol",
+    "deltaprime":                   "deltaprime",
+    "river-omni":                   "river-omni-cdp",
     "maker":                        "makerdao",
     "yearn-finance":                "yearn-finance",
     "synthetix-network-token":      "synthetix",
-    "havven":                       "synthetix",    # alt gecko_id for SNX
+    "havven":                       "synthetix",
     "liquity":                      "liquity",
     "1inch":                        "1inch",
     "frax-share":                   "frax",
-    # Fixable gaps
-    "morpho":                       "morpho-blue",  # morpho slug → $0; morpho-blue → $7.43B
+    "morpho":                       "morpho-blue",
     "virtuals-protocol":            "virtuals-protocol",
+    # New watchlist DeFi protocols
+    "ethena":                       "ethena",
+    "orca":                         "orca",
+    "stargate-finance":             "stargate",
+    "aevo-exchange":                "aevo",
+    "renzo":                        "renzo",
+    "rocket-pool":                  "rocket-pool",
+    "puffer-finance":               "puffer-finance",
+    "swell-network":                "swell",
+    "solv-protocol":                "solv-protocol",
+    "usual":                        "usual",
+    "drift-protocol":               "drift",
+    "ssv-network":                  "ssv-network",
+    "mantra-dao":                   "mantra",
+    "cetus-protocol":               "cetus",
+    "autonolas":                    "autonolas",
+    "across-protocol":              "across",
+    "gala":                         "gala",
 }
 
 
@@ -292,6 +466,26 @@ async def _fetch_top_300(client: httpx.AsyncClient) -> list[dict]:
         if len(out) >= 300:
             break
     return out[:300]
+
+
+async def _fetch_by_ids(client: httpx.AsyncClient, ids: set[str]) -> list[dict]:
+    """Fetch specific coins from CG /coins/markets by explicit IDs (for pinned tokens)."""
+    if not ids:
+        return []
+    headers = {"x-cg-pro-api-key": CG_KEY} if CG_KEY else {}
+    out = []
+    ids_list = sorted(ids)
+    for i in range(0, len(ids_list), 200):
+        batch = ids_list[i:i + 200]
+        r = await client.get(
+            f"{CG_BASE}/coins/markets",
+            params={"vs_currency": "usd", "ids": ",".join(batch), "per_page": 250},
+            headers=headers,
+            timeout=30,
+        )
+        if r.status_code == 200:
+            out.extend(r.json())
+    return out
 
 
 async def _fetch_excluded_ids(client: httpx.AsyncClient, categories: set[str]) -> set[str]:
@@ -339,41 +533,49 @@ async def resolve_universe(
 
     async with httpx.AsyncClient() as client:
         if api is not None:
-            markets, excluded_ids = await asyncio.gather(
-                _fetch_top_300(client),
+            (top_markets, pinned_markets), excluded_ids = await asyncio.gather(
+                asyncio.gather(
+                    _fetch_top_300(client),
+                    _fetch_by_ids(client, PINNED_IDS),
+                ),
                 _fetch_excluded_ids(client, exclude_categories),
             )
             llama_map: dict[str, str] | None = None
             cg_supported: set[str] | None = None
         else:
-            markets, excluded_ids, cg_supported, llama_map = await asyncio.gather(
-                _fetch_top_300(client),
+            (top_markets, pinned_markets), excluded_ids, cg_supported, llama_map = await asyncio.gather(
+                asyncio.gather(
+                    _fetch_top_300(client),
+                    _fetch_by_ids(client, PINNED_IDS),
+                ),
                 _fetch_excluded_ids(client, exclude_categories),
                 _fetch_coinglass_supported(client),
                 _fetch_defillama_protocols(client),
             )
 
+    # Merge: top-300 first, then any pinned tokens not already in top-300.
+    # Pinned tokens bypass exclude_tokens (which filters daily-analysis presets).
+    top_ids = {c["id"] for c in top_markets}
+    pinned_extra = [c for c in pinned_markets if c["id"] not in top_ids]
+    pinned_extra_ids = {c["id"] for c in pinned_extra}
+
     excluded_ids |= STABLE_IDS | RWA_IDS | WRAPPED_IDS | PRESET_EXCLUDED_IDS
 
     out: list[Token] = []
-    for c in markets[:top_n]:
+
+    for c in top_markets[:top_n] + pinned_extra:
         if c["id"] in excluded_ids:
             continue
-        if c["id"] in exclude_tokens:
+        # exclude_tokens only applies to rank-based tokens, not pinned extras
+        if c["id"] in exclude_tokens and c["id"] not in pinned_extra_ids:
             continue
         sym = c["symbol"].upper()
 
         if api is not None:
-            # coins-markets top-500 gets the fast path; supported-coins gets pairs-markets fallback
             has_coinglass = sym in api._cglass_today or sym in api._cglass_supported
         else:
             has_coinglass = sym in (cg_supported or set())
 
-        # Slug resolution priority:
-        # 1. CHAIN_MAP → L1/L2 chain: set chain_name, clear defillama_slug
-        #    (prevents wrong gecko_id matches like BNB → "binance-smart-chain" bridge)
-        # 2. SLUG_OVERRIDES → explicit protocol slug
-        # 3. gecko_id lookup (api cache or standalone fetch)
         cg_id = c["id"]
         chain_name: str | None = CHAIN_MAP.get(cg_id)
         if chain_name is not None:

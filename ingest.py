@@ -16,10 +16,7 @@ EXCLUDE_CATEGORIES = {
     "Stablecoins", "Wrapped-Tokens", "Liquid-Staked-Tokens",
     "Real World Assets",
 }
-PRESET_TOKENS = {
-    "bitcoin", "ethereum", "solana", "hyperliquid", "syrup", "ether-fi",
-    "ethena", "grass", "bittensor", "creator-chain", "berachain-bera", "aleo",
-}
+PRESET_TOKENS: set[str] = set()  # no longer excluded; all watchlist tokens tracked in scanner
 
 
 def load_state() -> dict:
