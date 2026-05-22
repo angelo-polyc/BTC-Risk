@@ -60,7 +60,7 @@ CHAIN_MAP: dict[str, str] = {
     "the-open-network":         "ton",
     "near":                     "near",
     "arbitrum":                 "arbitrum",
-    "optimism":                 "optimism",
+    "optimism":                 "Optimism",
     "aptos":                    "aptos",
     "sui":                      "sui",
     "fantom":                   "fantom",
@@ -80,7 +80,7 @@ CHAIN_MAP: dict[str, str] = {
     "blockstack":               "Stacks",
     "metis-token":              "Metis",
     "cardano":                  "Cardano",
-    "immutable-x":              "Immutable X",
+    "immutable-x":              "Immutable zkEVM",
     "hedera-hashgraph":         "Hedera",
     "polkadot":                 "Polkadot",
     "internet-computer":        "ICP",
@@ -90,6 +90,22 @@ CHAIN_MAP: dict[str, str] = {
     "monad":                    "Monad",
     "story-2":                  "Story",
     "plasma":                   "Plasma",
+    # Additional chains confirmed by DefiLlama agent audit
+    "stellar":                  "Stellar",      # $168M
+    "worldcoin-wld":            "World Chain",  # $38.7M
+    "elrond":                   "Elrond",       # $19M (MultiversX)
+    "iota":                     "IOTA",         # $13.8M
+    "chiliz":                   "Chiliz",       # $4.1M
+    "neo":                      "NEO",          # $4.0M
+    "apecoin":                  "ApeChain",     # $3.5M
+    "zcash":                    "Zcash",        # $2.7M
+    "litecoin":                 "Litecoin",     # $2.2M
+    "gala":                     "Gala",         # $7.1M
+    "linea":                    "Linea",        # $53.9M
+    "ripple":                   "Ripple",       # $47.5M
+    "dydx":                     "dYdX",         # $99M — dYdX is a chain, not a protocol
+    "provenance-blockchain":    "Provenance",   # $1.44B (HASH token)
+    "hash-2":                   "Provenance",   # alt CG ID for HASH
     # Tokens whose gecko_id matches a bridge/protocol slug — override to chain:
     "starknet":                 "Starknet",
     # Tokens with protocol slugs returning $0 — chain endpoint has real TVL:
@@ -121,15 +137,35 @@ SLUG_OVERRIDES: dict[str, str] = {
     "hyperliquid":                  "hyperliquid",     # was matching to hyperliquid-bridge
     "ondo-finance":                 "ondo-finance",    # was matching to ondo-yield-assets
     "sky":                          "sky",             # was matching to sky-lending
-    "thorchain":                    "thorchain",       # was "thorchain-dex"
-    "dydx":                         "dydx",            # gecko_id mismatch in llama
-    "pendle":                       "pendle",
+    "thorchain":                    "thorchain-dex",       # was "thorchain-dex"
+        "pendle":                       "pendle",
     "aerodrome-finance":            "aerodrome",
     "velodrome-finance":            "velodrome",
     "balancer":                     "balancer",
     "sushi":                        "sushiswap",
     "convex-finance":               "convex-finance",
     # Parent slugs absent from /protocols but accessible at /protocol/{slug}
+    # Exchange tokens — large TVL via exchange protocol slugs
+    "leo-token":                    "bitfinex",             # $18.67B
+    "bitget-token":                 "bitget",               # $5.73B
+    "htx-dao":                      "htx",                  # $5.61B
+    "kucoin-shares":                "kucoin",               # $2.71B
+    "pax-gold":                     "paxos-gold",           # $2.12B
+    "blockchain-capital":           "blockchain-capital",   # $963M
+    # Protocol slugs from audit
+    "centrifuge":                   "centrifuge-protocol",  # $1.48B (was missing from overrides)
+    "figure-heloc":                 "figure-markets-exchange", # $1.40B
+    "jito-governance":              "jito-liquid-staking",  # $877M
+    "aster-2":                      "aster-bridge",         # $873M
+    "olympus":                      "cooler-loans",         # $219M (olympus-dao is $0, cooler-loans is active)
+    "lighter":                      "lighter-bridge",       # $496M
+    "pump-fun":                     "pumpswap",             # $243M
+    "doublezero":                   "doublezero-staked-sol", # $619M
+    "chainlink":                    "stake.link-liquid",    # $68.5M (chainlink itself has no TVL)
+    "shiba-inu":                    "shibaswap-v1",         # $5.7M
+    "bonk":                         "bonk-staked-sol",      # $12.1M
+    "deltaprime":                   "deltaprime",           # $4.3M
+    "river-omni":                   "river-omni-cdp",       # $136M
     "maker":                        "makerdao",
     "yearn-finance":                "yearn-finance",
     "synthetix-network-token":      "synthetix",
