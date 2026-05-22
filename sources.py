@@ -149,10 +149,11 @@ class SourceAPI:
     async def _fetch_coinglass_coins_markets(self) -> None:
         try:
             r = await self._cglass_get("/api/futures/coins-markets",
-                                        params={"per_page": 300})
+                                        params={"per_page": 500})
             self._cglass_today = {
                 row["symbol"].upper(): row for row in r.get("data", [])
             }
+            print(f"[sources] coinglass coins-markets: {len(self._cglass_today)} symbols")
         except Exception as e:
             print(f"[sources] coinglass coins-markets failed: {e}")
             self._cglass_today = {}
@@ -205,19 +206,64 @@ class SourceAPI:
             return None
         try:
             row = self._cglass_today.get(sym)
-            if not row:
-                return None
-            oi = row.get("open_interest_usd")
-            long_vol = row.get("long_volume_usd_24h") or 0
-            short_vol = row.get("short_volume_usd_24h") or 0
-            perp_vol = (long_vol + short_vol) or None
-            long_liq = row.get("long_liquidation_usd_24h") or 0
-            short_liq = row.get("short_liquidation_usd_24h") or 0
-            liq_oi = (long_liq + short_liq) / oi if oi else None
-            apr = await self._cglass_funding_apr(sym)
-            return DerivsResult(oi=oi, funding_apr=apr, perp_vol=perp_vol, liq_oi_ratio=liq_oi)
+            if row:
+                # Primary path: coins-markets (pre-aggregated)
+                oi = row.get("open_interest_usd")
+                long_vol = row.get("long_volume_usd_24h") or 0
+                short_vol = row.get("short_volume_usd_24h") or 0
+                perp_vol = (long_vol + short_vol) or None
+                long_liq = row.get("long_liquidation_usd_24h") or 0
+                short_liq = row.get("short_liquidation_usd_24h") or 0
+                liq_oi = (long_liq + short_liq) / oi if oi else None
+                apr = await self._cglass_funding_apr(sym)
+                return DerivsResult(oi=oi, funding_apr=apr, perp_vol=perp_vol, liq_oi_ratio=liq_oi)
+            else:
+                # Fallback: pairs-markets aggregation for tokens outside coins-markets top-500
+                return await self._cglass_derivs_from_pairs(sym)
         except Exception as e:
             print(f"[cglass] {sym}: {e}")
+            return None
+
+    async def _cglass_derivs_from_pairs(self, symbol: str) -> DerivsResult | None:
+        """Aggregate OI, funding, vol, liqs from pairs-markets for tokens outside top-500."""
+        try:
+            r = await self._cglass_get("/api/futures/pairs-markets",
+                                        params={"symbol": symbol})
+            rows = r.get("data", [])
+            if not rows:
+                return None
+
+            # 1h settlement venues (others assumed 8h)
+            HOURLY = {"Hyperliquid", "Kraken", "Coinbase", "Crypto.com"}
+
+            total_oi, total_vol, total_liq_l, total_liq_s = 0.0, 0.0, 0.0, 0.0
+            weighted_apr, weight = 0.0, 0.0
+
+            for row in rows:
+                oi = float(row.get("open_interest_usd") or 0)
+                total_oi += oi
+                total_vol += float(row.get("volume_usd") or 0)
+                total_liq_l += float(row.get("long_liquidation_usd_24h") or 0)
+                total_liq_s += float(row.get("short_liquidation_usd_24h") or 0)
+                rate = row.get("funding_rate")
+                if rate is not None and oi > 0:
+                    ex = row.get("exchange_name", "")
+                    interval = 1 if ex in HOURLY else 8
+                    apr = float(rate) * (HOURS_PER_YEAR / interval)
+                    weighted_apr += apr * oi
+                    weight += oi
+
+            if total_oi == 0:
+                return None
+
+            return DerivsResult(
+                oi=total_oi,
+                funding_apr=(weighted_apr / weight) if weight > 0 else None,
+                perp_vol=total_vol or None,
+                liq_oi_ratio=(total_liq_l + total_liq_s) / total_oi if total_oi else None,
+            )
+        except Exception as e:
+            print(f"[cglass pairs] {symbol}: {e}")
             return None
 
     async def protocol(

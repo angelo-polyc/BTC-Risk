@@ -277,7 +277,8 @@ async def resolve_universe(
         sym = c["symbol"].upper()
 
         if api is not None:
-            has_coinglass = sym in api._cglass_today
+            # coins-markets top-500 gets the fast path; supported-coins gets pairs-markets fallback
+            has_coinglass = sym in api._cglass_today or sym in api._cglass_supported
         else:
             has_coinglass = sym in (cg_supported or set())
 
