@@ -345,7 +345,7 @@ CHAIN_MAP: dict[str, str] = {
     # Additional chains confirmed by DefiLlama agent audit
     "stellar":                  "Stellar",
     "worldcoin-wld":            "World Chain",
-    "elrond":                   "Elrond",
+    "elrond-erd-2":             "MultiversX",   # EGLD — chain rebranded from Elrond
     "iota":                     "IOTA",
     "chiliz":                   "Chiliz",
     "apecoin":                  "ApeChain",
@@ -353,7 +353,8 @@ CHAIN_MAP: dict[str, str] = {
     "litecoin":                 "Litecoin",
     "linea":                    "Linea",
     "ripple":                   "Ripple",
-    "dydx":                     "dYdX",
+    "dydx-chain":               "dYdX",         # DYDX — CG ID is dydx-chain
+    "beam-2":                   "Beam",         # BEAM gaming chain (Merit Circle)
     "provenance-blockchain":    "Provenance",
     "hash-2":                   "Provenance",
     # Tokens whose gecko_id matches a bridge/protocol slug — override to chain:
@@ -399,8 +400,8 @@ SLUG_OVERRIDES: dict[str, str] = {
     "kucoin-shares":                "kucoin",
     "pax-gold":                     "paxos-gold",
     # Protocol slugs from audit
-    "centrifuge":                   "centrifuge-protocol",
-    "jito-governance":              "jito-liquid-staking",
+    "centrifuge-2":                 "centrifuge-protocol",  # CFG — CG ID is centrifuge-2
+    "jito-governance-token":        "jito-liquid-staking",  # JTO — CG ID is jito-governance-token
     "aster-2":                      "aster-bridge",
     "lighter":                      "lighter-bridge",
     "pump-fun":                     "pumpswap",
@@ -410,6 +411,11 @@ SLUG_OVERRIDES: dict[str, str] = {
     "bonk":                         "bonk-staked-sol",
     "deltaprime":                   "deltaprime",
     "river-omni":                   "river-omni-cdp",
+    "river":                        "river-omni-cdp",   # RIVER token
+    "edgex":                        "edgex-bridge",     # EDGE — $150M TVL
+    "kamino":                       "kamino-lend",      # KMNO — $1.4B Solana DeFi
+    "cow-protocol":                 "cowswap",          # COW
+    "instadapp":                    "fluid-lending",    # FLUID — $863M TVL
     "maker":                        "makerdao",
     "yearn-finance":                "yearn-finance",
     "synthetix-network-token":      "synthetix",
