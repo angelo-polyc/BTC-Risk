@@ -36,6 +36,23 @@ app = FastAPI(lifespan=lifespan)
 async def healthz():
     return "ok"
 
+@app.get("/status")
+async def status(x_api_key: str | None = None):
+    """Lightweight status — as_of + counts only, no data payload."""
+    if API_KEY and x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if not DATA_FILE.exists():
+        return {"as_of": None, "tokens": 0, "oi": 0, "tvl": 0}
+    d = json.loads(DATA_FILE.read_text())
+    u = d.get("universe", [])
+    return {
+        "as_of": d.get("as_of"),
+        "tokens": len(u),
+        "oi": sum(1 for t in u if t["metrics"].get("oi")),
+        "tvl": sum(1 for t in u if t["metrics"].get("tvl")),
+        "funding": sum(1 for t in u if t["metrics"].get("funding_apr") is not None),
+    }
+
 @app.get("/divergence.json")
 async def divergence(x_api_key: str | None = None):
     if API_KEY and x_api_key != API_KEY:
