@@ -11,28 +11,21 @@ import httpx
 if TYPE_CHECKING:
     from sources import SourceAPI
 
-# Must be Pro endpoint — demo endpoint gets rate-limited on category calls,
-# causing excluded_ids to return empty and stables to leak into the universe.
 CG_BASE = "https://pro-api.coingecko.com/api/v3"
 CG_KEY = os.environ.get("COINGECKO_API_KEY")
 
-# CoinGecko category name → API slug
 _CAT_SLUGS: dict[str, str] = {
     "Stablecoins":          "stablecoins",
     "Wrapped-Tokens":       "wrapped-tokens",
     "Liquid-Staked-Tokens": "liquid-staking-tokens",
-    "Real World Assets":    "real-world-assets",   # tokenized treasuries, RWA funds
+    "Real World Assets":    "real-world-assets",
 }
 
-# Hardcoded fallback — always excluded even if category API misses them.
-# Update this list whenever a new stable/RWA cracks the top-300.
 STABLE_IDS: set[str] = {
-    # Core / legacy stablecoins
     "tether", "usd-coin", "dai", "first-digital-usd", "true-usd", "frax",
     "usdd", "paypal-usd", "gemini-dollar", "nusd", "liquity-usd", "fei-usd",
     "magic-internet-money", "usde", "ethena-usde", "curve-usd", "crvusd",
     "usual-usd", "usd0", "resolv-usd",
-    # Confirmed leaking as of 2026-04-29 (fixed by Pro API; kept as defence-in-depth)
     "usds", "usd1", "ripple-usd", "rlusd", "bfusd", "usdtb", "usdai",
     "mountain-protocol-usdm", "usdm", "satusd", "frax-dollar", "frxusd",
     "usdf", "celo-dollar", "jusd", "reusd", "stable",
@@ -40,12 +33,10 @@ STABLE_IDS: set[str] = {
 }
 
 RWA_IDS: set[str] = {
-    # Tokenized treasuries / institutional funds — confirmed leaking 2026-04-29
     "blackrock-usd-institutional-digital-liquidity-fund", "buidl",
     "hashnote-usyc", "usyc",
     "janus-henderson-aaa-clo-etf-tokenized", "jaaa",
     "janus-henderson-us-treasury-n-etf-tokenized", "jtrsy",
-    # Actual CG IDs (guesses above were wrong — corrected 2026-04-29)
     "janus-henderson-anemoy-treasury-fund",
     "janus-henderson-anemoy-aaa-clo-fund",
 }
@@ -57,15 +48,11 @@ WRAPPED_IDS: set[str] = {
     "wrapped-eeth", "wrapped-beacon-eth",
 }
 
-SLUG_OVERRIDES: dict[str, str] = {
-    "ether-fi":  "ether.fi",
-    "syrup":     "maple-finance",
-    # add as discovered
-}
-
-# CoinGecko ID → DefiLlama chain name for L1/L2 tokens.
-# Used as fallback for dex_vol when /summary/dexs/{slug} 404s (the token is a chain,
-# not a DEX protocol). Chain-level DEX vol = proxy for ecosystem activity / gas-token demand.
+# CG ID → DefiLlama chain slug.
+# Used for BOTH chain TVL (/v2/historicalChainTvl/{chain})
+# and chain DEX vol (/overview/dexs/{chain}).
+# Tokens here get chain_name set and defillama_slug=None,
+# preventing wrong gecko_id matches (bridge/protocol entries).
 CHAIN_MAP: dict[str, str] = {
     "binancecoin":              "bsc",
     "avalanche-2":              "avalanche",
@@ -89,11 +76,51 @@ CHAIN_MAP: dict[str, str] = {
     "crypto-com-chain":         "cronos",
     "coredaoorg":               "core",
     "core-dao":                 "core",
-    "zksync":                   "zksync",
+    "zksync":                   "zksync era",   # space required
     "blockstack":               "stacks",
     "metis-token":              "metis",
     "cardano":                  "cardano",
     "immutable-x":              "immutablex",
+    "hedera-hashgraph":         "hedera",
+    "polkadot":                 "polkadot",
+    "internet-computer":        "icp",
+    "cosmos":                   "cosmos",
+    "algorand":                 "algorand",
+    "celestia":                 "celestia",
+    "monad":                    "monad",
+    "story-2":                  "story",
+    "plasma":                   "plasma",
+    # Tokens whose gecko_id matches a bridge/protocol slug — override to chain:
+    "starknet":                 "starknet",     # was matching to "starknet-bridge"
+}
+
+# CG ID → correct DefiLlama protocol slug.
+# Overrides gecko_id-based lookup from /protocols list.
+# Priority: SLUG_OVERRIDES > gecko_id match > None
+SLUG_OVERRIDES: dict[str, str] = {
+    "ether-fi":                     "ether.fi",
+    "syrup":                        "maple-finance",
+    "uniswap":                      "uniswap",
+    "aave":                         "aave",            # was matching to aave-v2 only
+    "curve-dao-token":              "curve-dex",
+    "pancakeswap-token":            "pancakeswap",
+    "lido-dao":                     "lido",
+    "compound-governance-token":    "compound-v3",
+    "raydium":                      "raydium",
+    "jupiter-exchange-solana":      "jupiter",         # was matching to jupiter-lend
+    "gmx":                          "gmx",
+    "hyperliquid":                  "hyperliquid",     # was matching to hyperliquid-bridge
+    "ondo-finance":                 "ondo-finance",    # was matching to ondo-yield-assets
+    "sky":                          "sky",             # was matching to sky-lending
+    "gnosis":                       "gnosis",
+    "thorchain":                    "thorchain",       # was "thorchain-dex"
+    "dydx":                         "dydx",            # gecko_id mismatch in llama
+    "pendle":                       "pendle",
+    "aerodrome-finance":            "aerodrome",
+    "velodrome-finance":            "velodrome",
+    "balancer":                     "balancer",
+    "sushi":                        "sushi",
+    "convex-finance":               "convex-finance",
 }
 
 
@@ -102,9 +129,9 @@ class Token:
     id: str
     symbol: str
     rank: int
-    defillama_slug: str | None
+    defillama_slug: str | None   # DeFi protocol slug → /protocol/{slug} TVL + /summary/dexs/{slug} vol
+    chain_name: str | None       # DefiLlama chain slug → /v2/historicalChainTvl + /overview/dexs
     has_coinglass: bool
-    dex_chain: str | None = None
 
 
 async def _fetch_top_300(client: httpx.AsyncClient) -> list[dict]:
@@ -165,11 +192,6 @@ async def resolve_universe(
     exclude_tokens: set[str] | None = None,
     api: "SourceAPI | None" = None,
 ) -> list[Token]:
-    """Fetch and filter the token universe.
-
-    If `api` is provided (and prep_run() has been called), reuse its Coinglass and
-    DefiLlama caches instead of making duplicate API calls.
-    """
     exclude_categories = exclude_categories or set()
     exclude_tokens = exclude_tokens or set()
 
@@ -179,8 +201,8 @@ async def resolve_universe(
                 _fetch_top_300(client),
                 _fetch_excluded_ids(client, exclude_categories),
             )
-            cg_supported: set[str] | None = None
             llama_map: dict[str, str] | None = None
+            cg_supported: set[str] | None = None
         else:
             markets, excluded_ids, cg_supported, llama_map = await asyncio.gather(
                 _fetch_top_300(client),
@@ -189,7 +211,6 @@ async def resolve_universe(
                 _fetch_defillama_protocols(client),
             )
 
-    # Union hardcoded fallbacks — defence-in-depth against category API misses
     excluded_ids |= STABLE_IDS | RWA_IDS | WRAPPED_IDS
 
     out: list[Token] = []
@@ -201,22 +222,32 @@ async def resolve_universe(
         sym = c["symbol"].upper()
 
         if api is not None:
-            # Use coins-markets presence, not supported-coins list.
-            # supported-coins has 1152 symbols but many lack derivs history;
-            # _cglass_today only contains tokens the coins-markets endpoint returned,
-            # which is the actual data source for daily derivs snapshots.
             has_coinglass = sym in api._cglass_today
-            slug = api.defillama_slug(c["id"])
         else:
             has_coinglass = sym in (cg_supported or set())
-            slug = SLUG_OVERRIDES.get(c["id"]) or (llama_map or {}).get(c["id"])
+
+        # Slug resolution priority:
+        # 1. CHAIN_MAP → L1/L2 chain: set chain_name, clear defillama_slug
+        #    (prevents wrong gecko_id matches like BNB → "binance-smart-chain" bridge)
+        # 2. SLUG_OVERRIDES → explicit protocol slug
+        # 3. gecko_id lookup (api cache or standalone fetch)
+        cg_id = c["id"]
+        chain_name: str | None = CHAIN_MAP.get(cg_id)
+        if chain_name is not None:
+            defillama_slug: str | None = None
+        elif cg_id in SLUG_OVERRIDES:
+            defillama_slug = SLUG_OVERRIDES[cg_id]
+        elif api is not None:
+            defillama_slug = api.defillama_slug(cg_id)
+        else:
+            defillama_slug = (llama_map or {}).get(cg_id)
 
         out.append(Token(
-            id=c["id"],
+            id=cg_id,
             symbol=sym,
             rank=c["market_cap_rank"] or 999,
-            defillama_slug=slug,
+            defillama_slug=defillama_slug,
+            chain_name=chain_name,
             has_coinglass=has_coinglass,
-            dex_chain=CHAIN_MAP.get(c["id"]),
         ))
     return out

@@ -14,7 +14,7 @@ RETENTION_DAYS = 30
 
 EXCLUDE_CATEGORIES = {
     "Stablecoins", "Wrapped-Tokens", "Liquid-Staked-Tokens",
-    "Real World Assets",   # tokenized treasuries, RWA funds (BUIDL, USYC, JAAA, etc.)
+    "Real World Assets",
 }
 PRESET_TOKENS = {
     "bitcoin", "ethereum", "solana", "hyperliquid", "syrup", "ether-fi",
@@ -34,7 +34,7 @@ def write_atomic(state: dict) -> None:
     tmp.replace(DATA_FILE)
 
 
-_MIN_POINTS = 5  # minimum series length for a meaningful z-score
+_MIN_POINTS = 5
 
 
 def _vals(series: list) -> list[float]:
@@ -64,12 +64,6 @@ def _delta_z(values: list[float]) -> float | None:
 
 
 def compute_zscores(metrics: dict) -> dict:
-    """Compute z-scores over the 30d series for each metric.
-
-    LEVEL z: how anomalous is today's absolute value.
-    DELTA z: how anomalous is today's 24h % change.
-    Returns None for any metric with insufficient history (< 5 points).
-    """
     def z(metric, kind):
         v = _vals(metrics.get(metric, []))
         return _level_z(v) if kind == "level" else _delta_z(v)
@@ -104,8 +98,6 @@ async def run_ingest() -> None:
     existing_by_id = {t["id"]: t for t in state.get("universe", [])}
 
     async with SourceAPI() as api:
-        # Resolve universe first (needs coinglass/llama caches from prep_run)
-        # We do a lightweight prep_run without batch prices, then re-run with ids
         await api.prep_run()
 
         universe = await resolve_universe(
@@ -116,7 +108,6 @@ async def run_ingest() -> None:
         )
         print(f"[ingest] universe size: {len(universe)}")
 
-        # Batch-fetch all prices in 2 CG calls instead of 291 individual ones
         await api.prep_run(token_ids=[t.id for t in universe])
 
         sem = asyncio.Semaphore(8)
@@ -127,10 +118,10 @@ async def run_ingest() -> None:
                 "perp_vol": None, "liq_oi_ratio": None, "tvl": None, "dex_vol": None,
             }
             async with sem:
-                px, vol, dex_vol_snap = await api.price_volume(t.id)
+                px, vol = await api.price_volume(t.id)
                 out["price"] = px
                 out["spot_vol"] = vol
-                out["dex_vol"] = dex_vol_snap   # per-token DEX trading vol from CG tickers
+
                 if t.has_coinglass:
                     derivs = await api.derivatives(t.symbol)
                     if derivs:
@@ -138,14 +129,18 @@ async def run_ingest() -> None:
                         out["funding_apr"] = derivs.funding_apr
                         out["perp_vol"] = derivs.perp_vol
                         out["liq_oi_ratio"] = derivs.liq_oi_ratio
-                if t.defillama_slug or t.dex_chain:
-                    tvl, _ = await api.protocol(t.defillama_slug, t.dex_chain)
-                    out["tvl"] = tvl            # DefiLlama TVL only; dex_vol comes from CG
+
+                # TVL and DEX vol: DefiLlama for both protocol and chain tokens
+                # (consistent with backfill — no CG tickers dex_vol)
+                if t.defillama_slug or t.chain_name:
+                    tvl, dexv = await api.protocol(t.defillama_slug, t.chain_name)
+                    out["tvl"] = tvl
+                    out["dex_vol"] = dexv
+
             return t, out
 
         results = await asyncio.gather(*(pull(t) for t in universe))
 
-    # Merge into rolling state (outside the SourceAPI context — client already closed)
     new_universe = []
     for t, today_metrics in results:
         existing = existing_by_id.get(t.id, {"metrics": {m: [] for m in today_metrics}})
@@ -160,6 +155,7 @@ async def run_ingest() -> None:
             "symbol": t.symbol,
             "rank": t.rank,
             "defillama_slug": t.defillama_slug,
+            "chain_name": t.chain_name,
             "coinglass_coverage": t.has_coinglass,
             "metrics": merged,
             "zscores": compute_zscores(merged),

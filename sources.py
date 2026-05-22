@@ -1,21 +1,20 @@
 """Unified source wrapper — the only module that talks to external APIs.
 
-The ingest worker, backfill script, and any future consumer all go through `SourceAPI`.
-This isolates upstream-API mess (rate limits, response shapes, auth) into one file.
-
 Usage:
     async with SourceAPI(cg_key, coinglass_key) as api:
-        await api.prep_run()                          # warms internal caches once per ingest
+        await api.prep_run()                          # warms caches once per ingest
 
         # Today's snapshot per token
         px, vol = await api.price_volume("bitcoin")
         derivs  = await api.derivatives("BTC")        # DerivsResult or None
-        tvl, dx = await api.protocol("hyperliquid")   # (float, float) or (None, None)
+        tvl, dx = await api.protocol("hyperliquid")   # (float|None, float|None)
+        tvl, dx = await api.protocol(None, "bsc")     # chain TVL + chain DEX vol
 
         # 30-day backfill
         px_hist     = await api.price_history_30d("bitcoin")
         derivs_hist = await api.derivs_history_30d("BTC")
         proto_hist  = await api.protocol_history_30d("hyperliquid")
+        proto_hist  = await api.protocol_history_30d(None, "bsc")
 """
 from __future__ import annotations
 
@@ -24,7 +23,6 @@ import re
 import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Iterable
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -37,7 +35,6 @@ CG_BASE = "https://pro-api.coingecko.com/api/v3"
 CGLASS_BASE = "https://open-api-v4.coinglass.com"
 LLAMA_BASE = "https://api.llama.fi"
 
-# CEX whitelist for spot-volume filtering (user-curated 2026-04-27)
 ALLOWED_CEX: set[str] = {
     "Binance", "Bybit", "Gate", "Coinbase Exchange", "OKX", "MEXC", "Bitget", "Kraken",
     "HTX", "KuCoin", "Crypto.com Exchange", "Bullish", "BingX", "Bitfinex",
@@ -45,8 +42,8 @@ ALLOWED_CEX: set[str] = {
     "BitMEX", "Bithumb", "Bybit EU", "Hyperliquid",
 }
 
-# DEX patterns for spot-volume filtering — exchange identifier (not name) contains one of these.
-# Used to identify green-trust DEX tickers without depending on a runtime API fetch.
+# DEX patterns on market.identifier — included in spot vol.
+# CG Pro returns trust_score=null in tickers, so we match by exchange identifier instead.
 DEX_PATTERN = re.compile(
     r"(uniswap|pancakeswap|curve|raydium|aerodrome|velodrome|sushiswap|quickswap|meteora"
     r"|camelot|traderjoe|orca|whirlpool|lifinity|balancer|kyberswap|maverick|thruster"
@@ -54,11 +51,9 @@ DEX_PATTERN = re.compile(
     re.I,
 )
 
-# DefiLlama slug overrides for known edge cases (CG-id → DefiLlama slug)
 SLUG_OVERRIDES: dict[str, str] = {
     "ether-fi": "ether.fi",
     "syrup": "maple-finance",
-    # add as discovered
 }
 
 HOURS_PER_YEAR = 8760
@@ -70,13 +65,13 @@ HOURS_PER_YEAR = 8760
 @dataclass(frozen=True)
 class DerivsResult:
     oi: float | None
-    funding_apr: float | None         # OI-weighted, annualized %
+    funding_apr: float | None
     perp_vol: float | None
-    liq_oi_ratio: float | None        # 24h liqs USD / OI USD
+    liq_oi_ratio: float | None
 
 
 # ---------------------------------------------------------------------------
-# Retry decorator: handles transient HTTP errors with backoff
+# Retry decorator
 # ---------------------------------------------------------------------------
 
 _retry = retry(
@@ -92,7 +87,6 @@ _retry = retry(
 # ---------------------------------------------------------------------------
 
 class SourceAPI:
-    """Unified data-fetching layer. One client, three upstream services."""
 
     def __init__(
         self,
@@ -105,14 +99,11 @@ class SourceAPI:
         self._timeout = timeout
         self._client: httpx.AsyncClient | None = None
 
-        # Caches populated by prep_run() — refreshed once per ingest cycle
-        self._cglass_today: dict[str, dict] = {}     # symbol → coins-markets row
-        self._llama_protocols: dict[str, str] = {}   # CG-id → DefiLlama slug
-        self._cglass_supported: set[str] = set()     # symbols Coinglass tracks
-        self._price_cache: dict[str, float] = {}     # CG-id → price USD (batched)
-        self._tickers_sem = asyncio.Semaphore(3)     # throttle concurrent tickers calls
-
-    # -- lifecycle --
+        self._cglass_today: dict[str, dict] = {}
+        self._llama_protocols: dict[str, str] = {}
+        self._cglass_supported: set[str] = set()
+        self._price_cache: dict[str, float] = {}
+        self._tickers_sem = asyncio.Semaphore(3)
 
     async def __aenter__(self) -> "SourceAPI":
         self._client = httpx.AsyncClient(
@@ -131,11 +122,8 @@ class SourceAPI:
             raise RuntimeError("SourceAPI must be used as `async with` context")
         return self._client
 
-    # -- one-shot caches: call once per ingest run --
-
     async def prep_run(self, token_ids: list[str] | None = None) -> None:
-        """Pre-fetch shared caches. Call BEFORE iterating per-token.
-        Pass token_ids to batch-fetch prices (saves ~291 individual CG calls)."""
+        """Pre-fetch shared caches. Call BEFORE iterating per-token."""
         tasks = [
             self._fetch_coinglass_coins_markets(),
             self._fetch_coinglass_supported(),
@@ -146,7 +134,6 @@ class SourceAPI:
         await asyncio.gather(*tasks)
 
     async def _batch_fetch_prices(self, token_ids: list[str]) -> None:
-        """Fetch prices for all token_ids in batches of 250 (2 calls for ~291 tokens)."""
         batch_size = 250
         for i in range(0, len(token_ids), batch_size):
             batch = token_ids[i:i + batch_size]
@@ -189,38 +176,30 @@ class SourceAPI:
             print(f"[sources] defillama protocols failed: {e}")
             self._llama_protocols = {}
 
-    # -- universe helpers --
-
     def coinglass_supports(self, symbol: str) -> bool:
         return symbol.upper() in self._cglass_supported
 
     def defillama_slug(self, cg_id: str) -> str | None:
         return SLUG_OVERRIDES.get(cg_id) or self._llama_protocols.get(cg_id)
 
-    # -- today's metrics, per token --
+    # -- today's metrics --
 
-    async def price_volume(self, token_id: str) -> tuple[float | None, float | None, float | None]:
-        """CoinGecko: returns (price_usd, spot_vol_usd, dex_vol_usd).
-        spot_vol = CEX whitelist + all green-trust DEX tickers.
-        dex_vol  = green-trust DEX tickers only (per-token on-chain trading volume).
-        Price comes from the batch cache if prep_run(token_ids=...) was called.
-        Errors on price and vol are handled independently."""
+    async def price_volume(self, token_id: str) -> tuple[float | None, float | None]:
+        """Returns (price_usd, spot_vol_usd). Spot vol = CEX allowlist + DEX tickers."""
         price = self._price_cache.get(token_id)
         if price is None:
             try:
                 price = await self._cg_simple_price(token_id)
             except Exception as e:
                 print(f"[cg price] {token_id}: {e}")
-        spot_vol = None
-        dex_vol = None
+        vol = None
         try:
-            spot_vol, dex_vol = await self._cg_filtered_volume(token_id)
+            vol = await self._cg_filtered_volume(token_id)
         except Exception as e:
             print(f"[cg vol] {token_id}: {e}")
-        return price, spot_vol, dex_vol
+        return price, vol
 
     async def derivatives(self, symbol: str) -> DerivsResult | None:
-        """Coinglass: OI, OI-weighted annualized funding, perp volume, liqs/OI ratio."""
         sym = symbol.upper()
         if not self.coinglass_supports(sym):
             return None
@@ -235,42 +214,47 @@ class SourceAPI:
             long_liq = row.get("long_liquidation_usd_24h") or 0
             short_liq = row.get("short_liquidation_usd_24h") or 0
             liq_oi = (long_liq + short_liq) / oi if oi else None
-
-            # Annualized funding via per-venue OI-weighting
             apr = await self._cglass_funding_apr(sym)
-
-            return DerivsResult(
-                oi=oi,
-                funding_apr=apr,
-                perp_vol=perp_vol,
-                liq_oi_ratio=liq_oi,
-            )
+            return DerivsResult(oi=oi, funding_apr=apr, perp_vol=perp_vol, liq_oi_ratio=liq_oi)
         except Exception as e:
             print(f"[cglass] {sym}: {e}")
             return None
 
-    async def protocol(self, slug: str | None, dex_chain: str | None = None) -> tuple[float | None, float | None]:
-        """DefiLlama: returns (tvl_usd, 24h_dex_vol_usd).
-        dex_chain: DefiLlama chain slug used as fallback when slug has no DEX listing."""
-        if not slug and not dex_chain:
+    async def protocol(
+        self,
+        slug: str | None,
+        chain_name: str | None = None,
+    ) -> tuple[float | None, float | None]:
+        """Returns (tvl_usd, dex_vol_24h_usd).
+
+        slug:       DeFi protocol → /protocol/{slug} TVL, /summary/dexs/{slug} vol
+        chain_name: L1/L2 chain  → /v2/historicalChainTvl/{chain} TVL, /overview/dexs/{chain} vol
+        """
+        if not slug and not chain_name:
             return None, None
         try:
-            tvl, dex_vol = await asyncio.gather(
-                self._llama_protocol_tvl(slug) if slug else asyncio.sleep(0),
-                self._llama_dex_vol_24h(slug, dex_chain),
-                return_exceptions=True,
-            )
+            if slug:
+                tvl, dex_vol = await asyncio.gather(
+                    self._llama_protocol_tvl(slug),
+                    self._llama_dex_vol_24h(slug, None),
+                    return_exceptions=True,
+                )
+            else:
+                tvl, dex_vol = await asyncio.gather(
+                    self._llama_chain_tvl(chain_name),
+                    self._llama_dex_vol_24h(None, chain_name),
+                    return_exceptions=True,
+                )
             tvl = tvl if not isinstance(tvl, Exception) else None
             dex_vol = dex_vol if not isinstance(dex_vol, Exception) else None
             return tvl, dex_vol
         except Exception as e:
-            print(f"[llama] {slug}: {e}")
+            print(f"[llama] slug={slug} chain={chain_name}: {e}")
             return None, None
 
     # -- 30-day history (for backfill) --
 
     async def price_history_30d(self, token_id: str) -> list[tuple[date, float, float]]:
-        """CoinGecko marketChart: returns [(date, price_close, volume_usd), ...]."""
         try:
             params = {"vs_currency": "usd", "days": "30", "interval": "daily"}
             r = await self._cg_get(f"/coins/{token_id}/market_chart", params=params)
@@ -286,7 +270,6 @@ class SourceAPI:
             return []
 
     async def derivs_history_30d(self, symbol: str) -> list[tuple[date, float | None, float | None, float | None, float | None]]:
-        """Coinglass: returns [(date, oi, funding_apr, perp_vol, liq_oi_ratio), ...]."""
         sym = symbol.upper()
         if not self.coinglass_supports(sym):
             return []
@@ -300,7 +283,7 @@ class SourceAPI:
                 self._cglass_liq_history(sym, start_ms, end_ms),
                 return_exceptions=True,
             )
-            # Build a date-keyed dict from each
+
             def by_date(series, key="close"):
                 out = {}
                 if isinstance(series, Exception) or not series:
@@ -309,14 +292,14 @@ class SourceAPI:
                     ts = row.get("time") or row.get("t") or row.get("timestamp")
                     if not ts:
                         continue
-                    if ts > 1e12:  # ms → s
+                    if ts > 1e12:
                         ts /= 1000
                     d = datetime.fromtimestamp(ts, tz=timezone.utc).date()
                     out[d] = row.get(key)
                 return out
 
             oi_by = by_date(oi_hist, "close")
-            fr_by = by_date(fr_hist, "close")  # raw rate; annualization needs interval — see note
+            fr_by = by_date(fr_hist, "close")
             vol_by = by_date(vol_hist, "futures_vol_usd")
             liq_by = {}
             if not isinstance(liq_hist, Exception) and liq_hist:
@@ -329,15 +312,11 @@ class SourceAPI:
                     short_l = row.get("short_liquidation_usd") or row.get("shortLiquidationUsd") or 0
                     liq_by[d] = long_l + short_l
 
-            # Stitch into per-day rows
             all_dates = sorted(set(oi_by) | set(fr_by) | set(vol_by) | set(liq_by))
             out = []
             for d in all_dates:
                 oi = oi_by.get(d)
                 fr_raw = fr_by.get(d)
-                # The OI-weighted OHLC funding endpoint returns rates already in
-                # OI-weighted percent terms; period = 8h (Coinglass convention for
-                # this aggregate). Annualize via × 1095.
                 fapr = fr_raw * 1095 if fr_raw is not None else None
                 pvol = vol_by.get(d)
                 liqs = liq_by.get(d)
@@ -348,28 +327,45 @@ class SourceAPI:
             print(f"[cglass history] {sym}: {e}")
             return []
 
-    async def protocol_history_30d(self, slug: str | None, dex_chain: str | None = None) -> list[tuple[date, float | None, float | None]]:
-        """DefiLlama: returns [(date, tvl, dex_vol), ...] for last 30 days."""
-        if not slug and not dex_chain:
+    async def protocol_history_30d(
+        self,
+        slug: str | None,
+        chain_name: str | None = None,
+    ) -> list[tuple[date, float | None, float | None]]:
+        """Returns [(date, tvl, dex_vol), ...] for last 30 days."""
+        if not slug and not chain_name:
             return []
         try:
-            tvl_hist, dex_hist = await asyncio.gather(
-                self._llama_tvl_history(slug) if slug else asyncio.sleep(0),
-                self._llama_dex_vol_history(slug, dex_chain),
-                return_exceptions=True,
-            )
+            if slug:
+                tvl_hist, dex_hist = await asyncio.gather(
+                    self._llama_tvl_history(slug),
+                    self._llama_dex_vol_history(slug, None),
+                    return_exceptions=True,
+                )
+            else:
+                tvl_hist, dex_hist = await asyncio.gather(
+                    self._llama_chain_tvl_history(chain_name),
+                    self._llama_dex_vol_history(None, chain_name),
+                    return_exceptions=True,
+                )
+
             def by_date(series):
                 out = {}
                 if isinstance(series, Exception) or not series:
                     return out
                 for row in series:
-                    ts = row.get("date") if isinstance(row, dict) else row[0]
-                    val = row.get("totalLiquidityUSD") if isinstance(row, dict) else row[1]
+                    if isinstance(row, dict):
+                        ts = row.get("date")
+                        # Protocol TVL uses "totalLiquidityUSD"; chain TVL uses "tvl"
+                        val = row.get("totalLiquidityUSD") or row.get("tvl")
+                    else:
+                        ts, val = row[0], row[1]
                     if not ts: continue
                     if ts > 1e12: ts /= 1000
                     d = datetime.fromtimestamp(ts, tz=timezone.utc).date()
                     out[d] = val
                 return out
+
             tvl_by = by_date(tvl_hist)
             dex_by = by_date(dex_hist)
             today = date.today()
@@ -380,11 +376,11 @@ class SourceAPI:
                 out.append((d, tvl_by.get(d), dex_by.get(d)))
             return out
         except Exception as e:
-            print(f"[llama history] {slug}: {e}")
+            print(f"[llama history] slug={slug} chain={chain_name}: {e}")
             return []
 
     # =======================================================================
-    # Private — per-API request helpers
+    # Private helpers
     # =======================================================================
 
     # --- CoinGecko ---
@@ -401,16 +397,13 @@ class SourceAPI:
                                 params={"ids": token_id, "vs_currencies": "usd"})
         return r.get(token_id, {}).get("usd")
 
-    async def _cg_filtered_volume(self, token_id: str) -> tuple[float | None, float | None]:
-        """Returns (spot_vol_usd, dex_vol_usd) from a single tickers call.
-        spot_vol = CEX allowlist + DEX tickers.
-        dex_vol  = DEX tickers only (matched by DEX_PATTERN on exchange identifier).
-        Note: CG Pro API returns trust_score=null — we do NOT filter on trust_score here."""
+    async def _cg_filtered_volume(self, token_id: str) -> float | None:
+        """Spot vol = CEX allowlist + DEX tickers (matched by DEX_PATTERN on identifier).
+        CG Pro returns trust_score=null — do not filter on it."""
         async with self._tickers_sem:
             r = await self._cg_get(f"/coins/{token_id}/tickers",
                                     params={"depth": "false", "include_exchange_logo": "false"})
-            spot_total = 0.0
-            dex_total = 0.0
+            total = 0.0
             for t in r.get("tickers", []):
                 market_name = (t.get("market") or {}).get("name", "")
                 market_id = (t.get("market") or {}).get("identifier", "")
@@ -418,11 +411,10 @@ class SourceAPI:
                 if usd_vol is None:
                     continue
                 if market_name in ALLOWED_CEX:
-                    spot_total += usd_vol
+                    total += usd_vol
                 elif DEX_PATTERN.search(market_id or ""):
-                    spot_total += usd_vol
-                    dex_total += usd_vol
-        return spot_total or None, dex_total or None
+                    total += usd_vol
+        return total or None
 
     # --- Coinglass ---
 
@@ -434,15 +426,12 @@ class SourceAPI:
         return r.json()
 
     async def _cglass_funding_apr(self, symbol: str) -> float | None:
-        """OI-weighted annualized funding rate. Pulls per-venue rates+OI, computes APR per venue,
-        weights by OI USD. Methodology lives in the daily-analysis skill."""
         fr_resp, oi_resp = await asyncio.gather(
             self._cglass_get("/api/futures/funding-rate/exchange-list",
                               params={"symbol": symbol}),
             self._cglass_get("/api/futures/open-interest/exchange-list",
                               params={"symbol": symbol}),
         )
-        # Find the BTC/ETH/etc. entry (filter is broken upstream — returns all coins)
         fr_list = next((d.get("stablecoin_margin_list", [])
                         for d in fr_resp.get("data", [])
                         if d.get("symbol", "").upper() == symbol), [])
@@ -455,11 +444,11 @@ class SourceAPI:
         for fr in fr_list:
             ex = fr.get("exchange")
             rate = fr.get("funding_rate")
-            interval = fr.get("funding_rate_interval") or 8  # null → assume 8h
+            interval = fr.get("funding_rate_interval") or 8
             oi = oi_by.get(ex)
             if rate is None or oi is None or oi <= 0:
                 continue
-            apr = rate * (HOURS_PER_YEAR / interval)  # rate already in %
+            apr = rate * (HOURS_PER_YEAR / interval)
             weighted += apr * oi
             total_oi += oi
         return (weighted / total_oi) if total_oi > 0 else None
@@ -479,7 +468,6 @@ class SourceAPI:
         r = await self._cglass_get("/api/futures/funding-rate/oi-weight-history",
                                     params={"exchange": "Binance", "symbol": symbol,
                                             "interval": "1d", "limit": 35})
-        # close field is returned as a string — cast to float for downstream math
         rows = r.get("data", [])
         for row in rows:
             if "close" in row and row["close"] is not None:
@@ -511,15 +499,15 @@ class SourceAPI:
     # --- DefiLlama ---
 
     @_retry
-    async def _llama_get(self, path: str) -> dict:
+    async def _llama_get(self, path: str) -> dict | list:
         r = await self.client.get(f"{LLAMA_BASE}{path}")
         r.raise_for_status()
         return r.json()
 
     async def _llama_protocol_tvl(self, slug: str) -> float | None:
+        """Latest TVL for a DeFi protocol via /protocol/{slug}."""
         r = await self._llama_get(f"/protocol/{slug}")
         chain_tvls = r.get("chainTvls") or {}
-        # Sum the latest tvl across chains (DefiLlama returns daily series per chain)
         total = 0.0
         for chain_data in chain_tvls.values():
             tvl_series = chain_data.get("tvl", [])
@@ -528,7 +516,28 @@ class SourceAPI:
                 total += latest.get("totalLiquidityUSD") or 0
         return total or None
 
-    async def _llama_dex_vol_24h(self, slug: str | None, dex_chain: str | None = None) -> float | None:
+    async def _llama_chain_tvl(self, chain_name: str) -> float | None:
+        """Latest TVL for an L1/L2 chain via /v2/historicalChainTvl/{chain}."""
+        for name in (chain_name, chain_name.title()):
+            try:
+                r = await self._llama_get(f"/v2/historicalChainTvl/{name}")
+                if r:
+                    return float(r[-1].get("tvl") or 0) or None
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    continue
+                raise
+            except Exception:
+                break
+        return None
+
+    async def _llama_dex_vol_24h(
+        self,
+        slug: str | None,
+        chain_name: str | None = None,
+    ) -> float | None:
+        """24h DEX volume. Protocol: /summary/dexs/{slug} total24h field.
+        Chain: /overview/dexs/{chain} — total24h absent, use totalDataChart[-1][1]."""
         if slug:
             try:
                 r = await self._llama_get(f"/summary/dexs/{slug}")
@@ -536,23 +545,52 @@ class SourceAPI:
             except httpx.HTTPStatusError as e:
                 if e.response.status_code >= 500:
                     raise
-                # any 4xx (400 = chain slug not a DEX protocol, 404 = unknown) → fall through
+                # 4xx → fall through to chain endpoint
             except Exception:
-                pass  # connection errors, timeouts → fall through to chain
-        if dex_chain:
-            try:
-                r = await self._llama_get(f"/overview/dexs/{dex_chain}")
-                return r.get("total24h")
-            except Exception:
-                return None
+                pass
+        if chain_name:
+            for name in (chain_name, chain_name.title()):
+                try:
+                    r = await self._llama_get(f"/overview/dexs/{name}")
+                    # total24h does NOT exist on chain overview — use last chart point
+                    chart = r.get("totalDataChart") or []
+                    if chart:
+                        last = chart[-1]
+                        return float(last[1]) if isinstance(last, list) else None
+                    return None
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 404:
+                        continue
+                    raise
+                except Exception:
+                    break
         return None
 
     async def _llama_tvl_history(self, slug: str) -> list[dict]:
+        """30d protocol TVL history. Returns [{date: ts, totalLiquidityUSD: v}, ...]."""
         r = await self._llama_get(f"/protocol/{slug}")
-        # Pick the aggregated tvl series (DefiLlama returns 'tvl' array at top level)
         return r.get("tvl") or []
 
-    async def _llama_dex_vol_history(self, slug: str | None, dex_chain: str | None = None) -> list[list]:
+    async def _llama_chain_tvl_history(self, chain_name: str) -> list[dict]:
+        """30d chain TVL history. Returns [{date: ts, tvl: v}, ...]."""
+        for name in (chain_name, chain_name.title()):
+            try:
+                r = await self._llama_get(f"/v2/historicalChainTvl/{name}")
+                return r or []
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    continue
+                raise
+            except Exception:
+                break
+        return []
+
+    async def _llama_dex_vol_history(
+        self,
+        slug: str | None,
+        chain_name: str | None = None,
+    ) -> list[list]:
+        """30d DEX vol history. Returns [[timestamp, value], ...]."""
         if slug:
             try:
                 r = await self._llama_get(f"/summary/dexs/{slug}?dataType=dailyVolume")
@@ -560,59 +598,18 @@ class SourceAPI:
             except httpx.HTTPStatusError as e:
                 if e.response.status_code >= 500:
                     raise
-                # any 4xx → fall through to chain endpoint
+                # 4xx → fall through to chain endpoint
             except Exception:
-                pass  # connection errors, timeouts → fall through to chain
-        if dex_chain:
-            try:
-                r = await self._llama_get(f"/overview/dexs/{dex_chain}?dataType=dailyVolume")
-                return r.get("totalDataChart") or []
-            except Exception:
-                return []
+                pass
+        if chain_name:
+            for name in (chain_name, chain_name.title()):
+                try:
+                    r = await self._llama_get(f"/overview/dexs/{name}?dataType=dailyVolume")
+                    return r.get("totalDataChart") or []
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 404:
+                        continue
+                    raise
+                except Exception:
+                    break
         return []
-
-
-# ---------------------------------------------------------------------------
-# Convenience: thin module-level functions for simple consumers
-# ---------------------------------------------------------------------------
-
-async def fetch_today(token_id: str, symbol: str, slug: str | None) -> dict:
-    """One-shot helper: fetch all metrics for one token. For ad-hoc / debug use."""
-    async with SourceAPI() as api:
-        await api.prep_run()
-        px, vol, dex_vol = await api.price_volume(token_id)
-        derivs = await api.derivatives(symbol)
-        tvl, _ = await api.protocol(slug)
-        return {
-            "price": px, "spot_vol": vol, "dex_vol": dex_vol,
-            "oi": derivs.oi if derivs else None,
-            "funding_apr": derivs.funding_apr if derivs else None,
-            "perp_vol": derivs.perp_vol if derivs else None,
-            "liq_oi_ratio": derivs.liq_oi_ratio if derivs else None,
-            "tvl": tvl, "dex_vol": dx,
-        }
-
-
-if __name__ == "__main__":
-    import sys, json
-    async def _smoke():
-        async with SourceAPI() as api:
-            await api.prep_run()
-            tid, sym = sys.argv[1] if len(sys.argv) > 1 else "bitcoin", \
-                       sys.argv[2] if len(sys.argv) > 2 else "BTC"
-            slug = api.defillama_slug(tid)
-            px, vol, dex_vol = await api.price_volume(tid)
-            derivs = await api.derivatives(sym)
-            tvl, _ = await api.protocol(slug)
-            print(json.dumps({
-                "id": tid, "symbol": sym, "slug": slug,
-                "price": px, "spot_vol": vol, "dex_vol": dex_vol,
-                "derivs": {
-                    "oi": derivs.oi if derivs else None,
-                    "funding_apr_pct": derivs.funding_apr if derivs else None,
-                    "perp_vol": derivs.perp_vol if derivs else None,
-                    "liq_oi_ratio": derivs.liq_oi_ratio if derivs else None,
-                } if derivs else None,
-                "tvl": tvl, "dex_vol": dx,
-            }, indent=2, default=str))
-    asyncio.run(_smoke())

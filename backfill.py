@@ -21,19 +21,17 @@ async def main() -> None:
         )
         print(f"[backfill] universe: {len(universe)} tokens")
 
-        sem = asyncio.Semaphore(4)  # conservative — backfill hammers CG tickers
+        sem = asyncio.Semaphore(4)
 
         async def pull_history(t):
             metrics: dict[str, list] = {m: [] for m in
                 ["price", "spot_vol", "oi", "funding_apr", "perp_vol",
                  "liq_oi_ratio", "tvl", "dex_vol"]}
             async with sem:
-                # CoinGecko 30d daily history (price + volume in one call)
                 for d, px, vol in await api.price_history_30d(t.id):
                     metrics["price"].append({"d": d.isoformat(), "v": px})
                     metrics["spot_vol"].append({"d": d.isoformat(), "v": vol})
 
-                # Coinglass 30d history
                 if t.has_coinglass:
                     for d, oi, fapr, pvol, liqr in await api.derivs_history_30d(t.symbol):
                         if oi is not None:
@@ -45,13 +43,16 @@ async def main() -> None:
                         if liqr is not None:
                             metrics["liq_oi_ratio"].append({"d": d.isoformat(), "v": liqr})
 
-                # DefiLlama 30d history — TVL only; dex_vol source is CG tickers (daily ingest)
-                if t.defillama_slug or t.dex_chain:
-                    for d, tvl, _ in await api.protocol_history_30d(t.defillama_slug, t.dex_chain):
+                if t.defillama_slug or t.chain_name:
+                    for d, tvl, dexv in await api.protocol_history_30d(t.defillama_slug, t.chain_name):
                         if tvl is not None:
                             metrics["tvl"].append({"d": d.isoformat(), "v": tvl})
+                        if dexv is not None:
+                            metrics["dex_vol"].append({"d": d.isoformat(), "v": dexv})
 
-            print(f"[backfill] {t.symbol} done")
+            print(f"[backfill] {t.symbol} — "
+                  f"price={len(metrics['price'])} oi={len(metrics['oi'])} "
+                  f"tvl={len(metrics['tvl'])} dex_vol={len(metrics['dex_vol'])}")
             return t, metrics
 
         results = await asyncio.gather(*(pull_history(t) for t in universe))
@@ -63,6 +64,7 @@ async def main() -> None:
             "symbol": t.symbol,
             "rank": t.rank,
             "defillama_slug": t.defillama_slug,
+            "chain_name": t.chain_name,
             "coinglass_coverage": t.has_coinglass,
             "metrics": metrics,
             "zscores": compute_zscores(metrics),
