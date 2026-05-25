@@ -564,7 +564,7 @@ class SourceAPI:
 
     @_retry
     async def _llama_get(self, path: str) -> dict | list:
-        r = await self.client.get(f"{LLAMA_BASE}{path}")
+        r = await self.client.get(f"{LLAMA_BASE}{path}", timeout=20)
         r.raise_for_status()
         return r.json()
 
