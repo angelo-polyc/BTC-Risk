@@ -10,7 +10,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from ingest import run_ingest
-from backfill import main as run_backfill
+from backfill import main as run_backfill, backfill_symbols
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DATA_FILE = DATA_DIR / "divergence.json"
@@ -70,12 +70,45 @@ async def manual_ingest(x_api_key: str | None = None):
     return {"status": "started"}
 
 @app.post("/backfill")
-async def manual_backfill(x_api_key: str | None = None):
-    """One-shot 30d history seeder. Run once after first deploy."""
+async def manual_backfill(x_api_key: str | None = None, symbol: str | None = None):
+    """Seed 30d history. Optional ?symbol=BTC to backfill a single token."""
     if API_KEY and x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="unauthorized")
+    if symbol:
+        asyncio.create_task(backfill_symbols([symbol.upper()]))
+        return {"status": f"started — backfilling {symbol.upper()}"}
     asyncio.create_task(run_backfill())
     return {"status": "started — backfill runs in background, takes 5-10 min"}
+
+@app.post("/clear")
+async def clear_data(x_api_key: str | None = None, symbols: str = "all",
+                     metrics: str = "oi,funding_apr,perp_vol,liq_oi_ratio"):
+    """Wipe metric series for specified tokens.
+    ?symbols=all or comma-separated symbols (e.g. BTC,ETH)
+    ?metrics=comma-separated metric names (default: all derivs)
+    """
+    if API_KEY and x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if not DATA_FILE.exists():
+        raise HTTPException(status_code=404, detail="no data file")
+
+    metric_list = [m.strip() for m in metrics.split(",")]
+    sym_filter = None if symbols == "all" else {s.strip().upper() for s in symbols.split(",")}
+
+    d = json.loads(DATA_FILE.read_text())
+    cleared = 0
+    for t in d.get("universe", []):
+        if sym_filter and t["symbol"].upper() not in sym_filter:
+            continue
+        for m in metric_list:
+            if m in t["metrics"]:
+                t["metrics"][m] = []
+        cleared += 1
+
+    tmp = DATA_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(d, separators=(",", ":")))
+    tmp.replace(DATA_FILE)
+    return {"cleared": cleared, "metrics": metric_list, "symbols": symbols}
 
 @app.get("/debug/exchanges")
 async def debug_exchanges(x_api_key: str | None = None):
