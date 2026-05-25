@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import NamedTuple
 
 import httpx
@@ -11,6 +13,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 CGLASS_BASE = "https://open-api-v4.coinglass.com"
 CG_BASE     = "https://pro-api.coingecko.com/api/v3"
+_HERE       = Path(__file__).parent
 
 _retry = retry(
     stop=stop_after_attempt(3),
@@ -18,6 +21,10 @@ _retry = retry(
     retry=retry_if_exception_type((httpx.HTTPError, asyncio.TimeoutError)),
     reraise=True,
 )
+
+# Static symbol → CoinGecko ID map, built once and shipped with the code.
+# Covers 271/290 universe tokens. Update cg_ids.json when universe changes.
+_CG_ID_MAP: dict[str, str] = json.loads((_HERE / "cg_ids.json").read_text())
 
 
 class DayBar(NamedTuple):
@@ -39,7 +46,6 @@ class SourceAPI:
         self._timeout = timeout
         self._client: httpx.AsyncClient | None = None
         self._supported: set[str] = set()
-        self._cg_id_map: dict[str, str] = {}   # symbol.upper() → coingecko id
 
     async def __aenter__(self) -> "SourceAPI":
         self._client = httpx.AsyncClient(
@@ -59,6 +65,7 @@ class SourceAPI:
 
     @_retry
     async def _get(self, path: str, params: dict | None = None) -> dict:
+        """Coinglass API call with retry."""
         r = await self.client.get(
             f"{CGLASS_BASE}{path}",
             params=params,
@@ -67,14 +74,20 @@ class SourceAPI:
         r.raise_for_status()
         return r.json()
 
-    async def warm_supported(self) -> None:
-        """Pre-fetch Coinglass supported coins + CoinGecko symbol→id map."""
-        await asyncio.gather(
-            self._warm_coinglass_supported(),
-            self._warm_cg_id_map(),
+    @_retry
+    async def _cg_get(self, path: str, params: dict | None = None) -> dict:
+        """CoinGecko API call with retry."""
+        headers = {"x-cg-pro-api-key": self._cg_key} if self._cg_key else {}
+        r = await self.client.get(
+            f"{CG_BASE}{path}",
+            params=params,
+            headers=headers,
         )
+        r.raise_for_status()
+        return r.json()
 
-    async def _warm_coinglass_supported(self) -> None:
+    async def warm_supported(self) -> None:
+        """Pre-fetch Coinglass supported coins list."""
         try:
             r = await self._get("/api/futures/supported-coins")
             self._supported = {s.upper() for s in r.get("data", [])}
@@ -82,30 +95,6 @@ class SourceAPI:
         except Exception as e:
             print(f"[sources] coinglass supported-coins failed: {e}")
             self._supported = set()
-
-    async def _warm_cg_id_map(self) -> None:
-        """Build symbol → CoinGecko ID map from top-1000 by market cap."""
-        headers = {"x-cg-pro-api-key": self._cg_key} if self._cg_key else {}
-        mapping: dict[str, str] = {}
-        try:
-            for page in range(1, 5):   # 250 × 4 = top 1000
-                r = await self.client.get(
-                    f"{CG_BASE}/coins/markets",
-                    params={"vs_currency": "usd", "order": "market_cap_desc",
-                            "per_page": 250, "page": page},
-                    headers=headers,
-                )
-                r.raise_for_status()
-                for coin in r.json():
-                    sym = coin.get("symbol", "").upper()
-                    cid = coin.get("id", "")
-                    if sym and cid and sym not in mapping:
-                        mapping[sym] = cid
-            self._cg_id_map = mapping
-            print(f"[sources] coingecko id map: {len(mapping)} symbols")
-        except Exception as e:
-            print(f"[sources] coingecko id map failed: {e}")
-            self._cg_id_map = {}
 
     def supports(self, symbol: str) -> bool:
         return symbol.upper() in self._supported
@@ -115,19 +104,15 @@ class SourceAPI:
     # ------------------------------------------------------------------ #
 
     async def spot_history(self, symbol: str, limit: int = 220) -> list[DayBar]:
-        """Daily close prices. CoinGecko primary (broad coverage), Coinglass fallback."""
+        """Daily close prices. CoinGecko primary (static ID map), Coinglass fallback."""
         # -- CoinGecko (primary) --
-        cg_id = self._cg_id_map.get(symbol.upper())
+        cg_id = _CG_ID_MAP.get(symbol.upper())
         if cg_id:
             try:
-                headers = {"x-cg-pro-api-key": self._cg_key} if self._cg_key else {}
-                r = await self.client.get(
-                    f"{CG_BASE}/coins/{cg_id}/market_chart",
-                    params={"vs_currency": "usd", "days": str(limit), "interval": "daily"},
-                    headers=headers,
+                data = await self._cg_get(
+                    f"/coins/{cg_id}/market_chart",
+                    {"vs_currency": "usd", "days": str(limit), "interval": "daily"},
                 )
-                r.raise_for_status()
-                data = r.json()
                 prices = data.get("prices", [])
                 if len(prices) >= 10:
                     out = []
@@ -212,7 +197,7 @@ class SourceAPI:
     # ------------------------------------------------------------------ #
 
     async def funding_history(self, symbol: str, limit: int = 100) -> list[DayBar]:
-        """OI-weighted daily funding rate (as decimal, e.g. 0.0001 per 8h)."""
+        """OI-weighted daily funding rate."""
         if not self.supports(symbol):
             return []
         try:
