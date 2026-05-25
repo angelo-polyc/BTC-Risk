@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, wait_fixed, retry_if_exception_type
 
 # ---------------------------------------------------------------------------
 # Config
@@ -76,7 +76,7 @@ class DerivsResult:
 
 _retry = retry(
     stop=stop_after_attempt(2),
-    wait=wait_exponential(multiplier=1, min=2, max=8),
+    wait=wait_fixed(5),
     retry=retry_if_exception_type((httpx.HTTPError, asyncio.TimeoutError)),
     reraise=True,
 )
@@ -109,7 +109,7 @@ class SourceAPI:
 
     async def __aenter__(self) -> "SourceAPI":
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=5.0, read=8.0, write=5.0, pool=5.0),
+            timeout=httpx.Timeout(connect=5.0, read=15.0, write=5.0, pool=5.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
         return self

@@ -9,6 +9,14 @@ from universe import resolve_universe
 from ingest import DATA_FILE, EXCLUDE_CATEGORIES, PRESET_TOKENS, compute_zscores
 
 
+def _checkpoint(out_universe: list) -> None:
+    """Write partial results to .tmp file — promoted to final on completion."""
+    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+    state = {"as_of": date.today().isoformat(), "universe": out_universe}
+    tmp = DATA_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, separators=(",", ":")))
+
+
 async def pull_history_single(t, sem: asyncio.Semaphore, api) -> tuple:
     """Fetch 30d history for a single token. Shared by full and selective backfill."""
     metrics: dict[str, list] = {m: [] for m in
@@ -21,10 +29,19 @@ async def pull_history_single(t, sem: asyncio.Semaphore, api) -> tuple:
         except Exception as e:
             print(f"[backfill] {t.symbol} price_history failed: {e}")
 
-        # Derivs (oi/funding/perp_vol/liq) deliberately excluded from backfill.
-        # 289 tokens x 4 Coinglass history calls = 1156 requests — hits rate limits.
-        # Coinglass rate-limits by black-holing sockets (no 429, just silence).
-        # Daily ingest handles derivs at sustainable rate (1 call/token/day).
+        if t.has_coinglass:
+            try:
+                for d, oi, fapr, pvol, liqr in await api.derivs_history_30d(t.symbol):
+                    if oi is not None:
+                        metrics["oi"].append({"d": d.isoformat(), "v": oi})
+                    if fapr is not None:
+                        metrics["funding_apr"].append({"d": d.isoformat(), "v": fapr})
+                    if pvol is not None:
+                        metrics["perp_vol"].append({"d": d.isoformat(), "v": pvol})
+                    if liqr is not None:
+                        metrics["liq_oi_ratio"].append({"d": d.isoformat(), "v": liqr})
+            except Exception as e:
+                print(f"[backfill] {t.symbol} derivs_history failed: {e}")
 
         if t.defillama_slug or t.chain_name:
             try:
@@ -64,38 +81,52 @@ async def main() -> None:
         )
         print(f"[backfill] universe: {len(universe)} tokens")
 
-        sem = asyncio.Semaphore(20)
-        results = await asyncio.gather(*(pull_history_single(t, sem, api) for t in universe))
+        # Sequential per-token with 1s pacing — avoids burst that triggers
+        # Coinglass edge throttling (black-holes connections, not 429s).
+        # 4 calls per token fire in parallel inside pull_history_single.
+        # ~4 req/sec sustained → 237 Coinglass tokens × 1s = ~4 min.
+        sem = asyncio.Semaphore(4)  # caps the 4 parallel calls per token
+        DERIVS = {"oi", "funding_apr", "perp_vol", "liq_oi_ratio"}
+        out_universe = []
 
-    # Merge logic: backfill wins if it fetched ≥5 data points for a metric.
-    # If backfill got <5 pts (endpoint had no coverage) but existing data has ≥5,
-    # keep existing to preserve ingest-accumulated history.
-    DERIVS = {"oi", "funding_apr", "perp_vol", "liq_oi_ratio"}
+        def _merge_and_append(t, metrics):
+            existing = existing_by_id.get(t.id, {})
+            existing_metrics = existing.get("metrics", {})
+            final_metrics = dict(metrics)
+            for m in DERIVS:
+                bf_pts = len(final_metrics.get(m) or [])
+                ex_pts = len(existing_metrics.get(m) or [])
+                if bf_pts < 5 and ex_pts >= 5:
+                    final_metrics[m] = existing_metrics[m]
+            out_universe.append({
+                "id": t.id, "symbol": t.symbol, "rank": t.rank,
+                "defillama_slug": t.defillama_slug, "chain_name": t.chain_name,
+                "coinglass_coverage": t.has_coinglass,
+                "metrics": final_metrics, "zscores": compute_zscores(final_metrics),
+            })
 
-    out_universe = []
-    for t, metrics in results:
-        existing = existing_by_id.get(t.id, {})
-        existing_metrics = existing.get("metrics", {})
-        final_metrics = dict(metrics)
-        for m in DERIVS:
-            bf_pts = len(final_metrics.get(m) or [])
-            ex_pts = len(existing_metrics.get(m) or [])
-            if bf_pts < 5 and ex_pts >= 5:
-                final_metrics[m] = existing_metrics[m]
-        out_universe.append({
-            "id": t.id,
-            "symbol": t.symbol,
-            "rank": t.rank,
-            "defillama_slug": t.defillama_slug,
-            "chain_name": t.chain_name,
-            "coinglass_coverage": t.has_coinglass,
-            "metrics": final_metrics,
-            "zscores": compute_zscores(final_metrics),
-        })
+        for i, t in enumerate(universe):
+            try:
+                _, metrics = await pull_history_single(t, sem, api)
+            except Exception as e:
+                print(f"[backfill] {t.symbol} failed: {e}")
+                metrics = {m: [] for m in ["price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol"]}
+            _merge_and_append(t, metrics)
 
-    state = {"as_of": date.today().isoformat(), "universe": out_universe}
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    DATA_FILE.write_text(json.dumps(state, separators=(",", ":")))
+            # Checkpoint every 25 tokens so a crash doesn't lose all work
+            if (i + 1) % 25 == 0:
+                print(f"[backfill] checkpoint {i+1}/{len(universe)}")
+                _checkpoint(out_universe)
+
+            # 1s pace between tokens → ~4 req/sec sustained
+            if t.has_coinglass:
+                await asyncio.sleep(1.0)
+
+    _checkpoint(out_universe)
+    # Promote checkpoint to final file
+    tmp = DATA_FILE.with_suffix(".tmp")
+    if tmp.exists():
+        tmp.replace(DATA_FILE)
     size_kb = DATA_FILE.stat().st_size // 1024
     print(f"[backfill] complete — {len(out_universe)} tokens, ~{size_kb}KB → {DATA_FILE}")
 
