@@ -52,11 +52,11 @@ def compute_scores(
     if prices.empty:
         raise ValueError("prices panel is empty")
 
-    # Align CVD panels to the price universe
-    common = sorted(set(prices.columns) & set(cvd_buy.columns) & set(cvd_sell.columns))
-    prices_c = prices[common]
-    buy_c    = cvd_buy[common].reindex(prices.index)
-    sell_c   = cvd_sell[common].reindex(prices.index)
+    # Price panel is the universe. CVD is reindexed to it — NaN where unavailable.
+    # Tokens without CVD still score on 3 momentum components (v1 behaviour).
+    prices_c = prices
+    buy_c    = cvd_buy.reindex(index=prices.index, columns=prices.columns)
+    sell_c   = cvd_sell.reindex(index=prices.index, columns=prices.columns)
 
     # ---- momentum components ----
     skip = 2  # avoid microstructure noise
