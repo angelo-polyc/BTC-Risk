@@ -2483,8 +2483,8 @@ function drawDivCell(ctx, ri, ci, token, showLabel) {
   ctx.fillStyle = divZColor(z);
   ctx.fillRect(x, y, DIV_CELL_W - 1, DIV_CELL_H - 1);
 
-  if (showLabel) {
-    const text = (z !== null && z !== undefined) ? (z >= 0 ? "+" : "") + z.toFixed(1) + "σ" : "—";
+  if (showLabel && z !== null && z !== undefined) {
+    const text = (z >= 0 ? "+" : "") + z.toFixed(1) + "σ";
     const cx   = x + DIV_CELL_W / 2;
     const cy   = y + DIV_CELL_H * 0.72;
     ctx.font        = "bold 9px 'JetBrains Mono', monospace";
