@@ -82,17 +82,19 @@ class SourceAPI:
     # ------------------------------------------------------------------ #
 
     async def spot_history(self, symbol: str, limit: int = 220) -> list[DayBar]:
-        """Daily close prices. Falls back Binance → Bybit → OKX."""
-        for exchange, pair in [
-            ("Binance", f"{symbol}USDT"),
-            ("Bybit",   f"{symbol}USDT"),
-            ("OKX",     f"{symbol}-USDT"),
-        ]:
+        """Daily close prices. Tries spot first (Binance→Bybit→OKX), then perp as fallback."""
+        candidates = [
+            ("/api/spot/price/history",    "Binance", f"{symbol}USDT"),
+            ("/api/spot/price/history",    "Bybit",   f"{symbol}USDT"),
+            ("/api/spot/price/history",    "OKX",     f"{symbol}-USDT"),
+            ("/api/futures/price/history", "Binance", f"{symbol}USDT"),
+            ("/api/futures/price/history", "Bybit",   f"{symbol}USDT"),
+            ("/api/futures/price/history", "OKX",     f"{symbol}-USDT-SWAP"),
+        ]
+        for path, exchange, pair in candidates:
             try:
-                r = await self._get(
-                    "/api/spot/price/history",
-                    {"exchange": exchange, "symbol": pair, "interval": "1d", "limit": limit},
-                )
+                r = await self._get(path, {"exchange": exchange, "symbol": pair,
+                                           "interval": "1d", "limit": limit})
                 data = r.get("data") or []
                 if len(data) < 10:
                     continue
@@ -110,7 +112,7 @@ class SourceAPI:
                 if out:
                     return sorted(out, key=lambda x: x.date)
             except Exception as e:
-                print(f"[sources] spot {symbol} {exchange}: {e}")
+                print(f"[sources] price {symbol} {exchange}: {e}")
         return []
 
     # ------------------------------------------------------------------ #
