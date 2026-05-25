@@ -289,6 +289,10 @@ PINNED_IDS: set[str] = {
     "ynesnoerror",              # YNE
     "zerebro",                  # ZEREBRO
     "0x",                       # ZRX
+    # Tokens with DefiLlama config but outside top-300 — must be pinned
+    "kamino",                   # KMNO ($1.4B TVL)
+    "cow-protocol",             # COW
+    "beam-2",                   # BEAM gaming chain
 }
 
 # CG ID → DefiLlama chain slug.
