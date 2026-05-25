@@ -129,7 +129,12 @@ async def main() -> None:
 
         for i, t in enumerate(universe):
             try:
-                _, metrics = await pull_history_single(t, sem, api)
+                _, metrics = await asyncio.wait_for(
+                    pull_history_single(t, sem, api), timeout=45
+                )
+            except asyncio.TimeoutError:
+                _log(f"[backfill] {t.symbol} timed out at 45s — skipping")
+                metrics = {m: [] for m in ["price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol"]}
             except Exception as e:
                 _log(f"[backfill] {t.symbol} failed: {e}")
                 metrics = {m: [] for m in ["price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol"]}
