@@ -65,12 +65,13 @@ def _log(msg: str) -> None:
     from datetime import datetime
     line = f"{datetime.utcnow().isoformat()} {msg}\n"
     print(line.strip())
-    try:
-        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(LOG_FILE, "a") as f:
-            f.write(line)
-    except Exception:
-        pass
+    for path in (LOG_FILE, Path("/tmp/backfill.log")):
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a") as f:
+                f.write(line)
+        except Exception:
+            pass
 
 
 async def main() -> None:

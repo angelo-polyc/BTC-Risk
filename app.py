@@ -14,6 +14,9 @@ from backfill import main as run_backfill, backfill_symbols
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DATA_FILE = DATA_DIR / "divergence.json"
+
+# Keep strong references to background tasks to prevent GC
+_background_tasks: set = set()
 API_KEY = os.environ.get("READ_API_KEY")
 
 scheduler = AsyncIOScheduler(timezone="UTC")
@@ -41,10 +44,10 @@ async def get_logs(x_api_key: str | None = None):
     """Read backfill log file."""
     if API_KEY and x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="unauthorized")
-    log_file = DATA_DIR / "backfill.log"
-    if not log_file.exists():
-        return PlainTextResponse("no log file yet")
-    return PlainTextResponse(log_file.read_text()[-5000:])  # last 5KB
+    for log_file in (DATA_DIR / "backfill.log", Path("/tmp/backfill.log")):
+        if log_file.exists():
+            return PlainTextResponse(log_file.read_text()[-5000:])
+    return PlainTextResponse("no log file yet")
 
 @app.get("/status")
 async def status(x_api_key: str | None = None):
@@ -76,7 +79,9 @@ async def manual_ingest(x_api_key: str | None = None):
     """Manual trigger — useful for first deploy and debugging."""
     if API_KEY and x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="unauthorized")
-    asyncio.create_task(run_ingest())
+    task = asyncio.create_task(run_ingest())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     return {"status": "started"}
 
 @app.get("/checkpoint")
@@ -102,9 +107,13 @@ async def manual_backfill(x_api_key: str | None = None, symbol: str | None = Non
     if API_KEY and x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="unauthorized")
     if symbol:
-        asyncio.create_task(backfill_symbols([symbol.upper()]))
+        task = asyncio.create_task(backfill_symbols([symbol.upper()]))
+    else:
+        task = asyncio.create_task(run_backfill())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    if symbol:
         return {"status": f"started — backfilling {symbol.upper()}"}
-    asyncio.create_task(run_backfill())
     return {"status": "started — backfill runs in background, takes 5-10 min"}
 
 @app.post("/clear")
