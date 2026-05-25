@@ -677,7 +677,7 @@
     max-height: 78vh;
     border: 1px solid var(--rule-soft);
     border-radius: 2px;
-    background: var(--bg-soft);
+    background: white;
   }
   #div-heatmap-canvas { display: block; cursor: crosshair; }
   #div-tooltip {
@@ -2455,23 +2455,47 @@ const DIV_CELL_W   = 64;
 const DIV_LEFT_M   = 70;
 const DIV_TOP_M    = 46;
 
-// --bg #faf8f3=(250,248,243)  --bull #2e6a3b=(46,106,59)  --bear #b5381f=(181,56,31)
+// white center, --bull green, --bear red
 function divZColor(z) {
-  if (z === null || z === undefined || isNaN(z)) return "#dcd7c8";
+  if (z === null || z === undefined || isNaN(z)) return "#e8e4db";
   const t = Math.max(-1, Math.min(1, z / 5));
   if (t < 0) {
     const s = -t;
-    return "rgb(" + Math.round(250 + (46  - 250) * s) + "," +
-                    Math.round(248 + (106 - 248) * s) + "," +
-                    Math.round(243 + (59  - 243) * s) + ")";
+    return "rgb(" + Math.round(255 + (46  - 255) * s) + "," +
+                    Math.round(255 + (106 - 255) * s) + "," +
+                    Math.round(255 + (59  - 255) * s) + ")";
   } else {
-    return "rgb(" + Math.round(250 + (181 - 250) * t) + "," +
-                    Math.round(248 + (56  - 248) * t) + "," +
-                    Math.round(243 + (31  - 243) * t) + ")";
+    return "rgb(" + Math.round(255 + (181 - 255) * t) + "," +
+                    Math.round(255 + (56  - 255) * t) + "," +
+                    Math.round(255 + (31  - 255) * t) + ")";
   }
 }
 
-let _divUniverse = null;
+let _divUniverse   = null;
+let _divHoverCell  = { ri: -1, ci: -1 };
+let _divHoverSetup = false;
+
+function drawDivCell(ctx, ri, ci, token, showLabel) {
+  const x  = DIV_LEFT_M + ci * DIV_CELL_W;
+  const y  = DIV_TOP_M  + ri * DIV_CELL_H;
+  const z  = (token.zscores || {})[DIV_Z_COLS[ci]];
+
+  ctx.fillStyle = divZColor(z);
+  ctx.fillRect(x, y, DIV_CELL_W - 1, DIV_CELL_H - 1);
+
+  if (showLabel) {
+    const text = (z !== null && z !== undefined) ? (z >= 0 ? "+" : "") + z.toFixed(1) + "σ" : "—";
+    const cx   = x + DIV_CELL_W / 2;
+    const cy   = y + DIV_CELL_H * 0.72;
+    ctx.font        = "bold 9px 'JetBrains Mono', monospace";
+    ctx.textAlign   = "center";
+    ctx.lineWidth   = 2.5;
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.strokeText(text, cx, cy);
+    ctx.fillStyle   = "#000";
+    ctx.fillText(text, cx, cy);
+  }
+}
 
 function renderDivCanvas(universe) {
   const canvas = document.getElementById("div-heatmap-canvas");
@@ -2486,11 +2510,14 @@ function renderDivCanvas(universe) {
 
   const ctx = canvas.getContext("2d");
   ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, W, H);
+
+  // White background
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, W, H);
 
   // Column headers
   ctx.font = "500 9.5px 'JetBrains Mono', monospace";
-  ctx.fillStyle = "#545450";
+  ctx.fillStyle = "#000";
   ctx.textAlign = "center";
   DIV_Z_LABELS.forEach((label, ci) => {
     const x = DIV_LEFT_M + ci * DIV_CELL_W + DIV_CELL_W / 2;
@@ -2501,73 +2528,69 @@ function renderDivCanvas(universe) {
 
   // Rows
   universe.forEach((token, ri) => {
-    const y  = DIV_TOP_M + ri * DIV_CELL_H;
-    const zs = token.zscores || {};
+    const y = DIV_TOP_M + ri * DIV_CELL_H;
 
     // Symbol label
     ctx.font = "600 9.5px 'JetBrains Mono', monospace";
-    ctx.fillStyle = "#0e0e0e";
+    ctx.fillStyle = "#000";
     ctx.textAlign = "right";
     ctx.fillText(token.symbol, DIV_LEFT_M - 5, y + DIV_CELL_H * 0.68);
 
     // Cells
-    DIV_Z_COLS.forEach((col, ci) => {
-      const x = DIV_LEFT_M + ci * DIV_CELL_W;
-      ctx.fillStyle = divZColor(zs[col]);
-      ctx.fillRect(x, y, DIV_CELL_W - 1, DIV_CELL_H - 1);
-    });
+    DIV_Z_COLS.forEach((_, ci) => drawDivCell(ctx, ri, ci, token, false));
 
     // Divider every 10 rows
     if ((ri + 1) % 10 === 0) {
-      ctx.fillStyle = "rgba(0,0,0,0.12)";
+      ctx.fillStyle = "rgba(0,0,0,0.1)";
       ctx.fillRect(DIV_LEFT_M, y + DIV_CELL_H - 1, DIV_Z_COLS.length * DIV_CELL_W, 1);
     }
   });
+
+  _divHoverCell = { ri: -1, ci: -1 };
 }
 
-function setupDivHover(universe) {
-  const canvas  = document.getElementById("div-heatmap-canvas");
-  const tooltip = document.getElementById("div-tooltip");
+function setupDivHover() {
+  const canvas = document.getElementById("div-heatmap-canvas");
 
   canvas.addEventListener("mousemove", e => {
+    if (!_divUniverse) return;
     const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const ri = Math.floor((my - DIV_TOP_M)  / DIV_CELL_H);
-    const ci = Math.floor((mx - DIV_LEFT_M) / DIV_CELL_W);
+    const ri = Math.floor((e.clientY - rect.top  - DIV_TOP_M)  / DIV_CELL_H);
+    const ci = Math.floor((e.clientX - rect.left - DIV_LEFT_M) / DIV_CELL_W);
+    const valid = ri >= 0 && ri < _divUniverse.length && ci >= 0 && ci < DIV_Z_COLS.length;
 
-    if (ri < 0 || ri >= universe.length || ci < 0 || ci >= DIV_Z_COLS.length) {
-      tooltip.style.display = "none"; return;
+    if (ri === _divHoverCell.ri && ci === _divHoverCell.ci) return; // no change
+
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Restore previous cell
+    const { ri: pri, ci: pci } = _divHoverCell;
+    if (pri >= 0 && pci >= 0) drawDivCell(ctx, pri, pci, _divUniverse[pri], false);
+
+    if (valid) {
+      drawDivCell(ctx, ri, ci, _divUniverse[ri], true);
+      _divHoverCell = { ri, ci };
+    } else {
+      _divHoverCell = { ri: -1, ci: -1 };
     }
-    const token = universe[ri];
-    const mcap  = token.market_cap_usd
-      ? "$" + (token.market_cap_usd / 1e9).toFixed(2) + "B" : "—";
-    const lines = [
-      token.symbol + "   " + mcap,
-      "",
-      ...DIV_Z_COLS.map((col, i) => {
-        const v   = (token.zscores || {})[col];
-        const pfx = col === DIV_Z_COLS[ci] ? "▶ " : "  ";
-        const lab = DIV_Z_LABELS[i].replace("\n", " ").padEnd(11);
-        const val = (v !== null && v !== undefined) ? (v >= 0 ? "+" : "") + v.toFixed(2) + "σ" : "—";
-        return pfx + lab + val;
-      })
-    ];
-    tooltip.textContent = lines.join("\n");
-    tooltip.style.display = "block";
-    // Keep tooltip on screen
-    const tx = e.clientX + 16;
-    const ty = e.clientY - 8;
-    tooltip.style.left = tx + "px";
-    tooltip.style.top  = ty + "px";
   });
 
-  canvas.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+  canvas.addEventListener("mouseleave", () => {
+    if (!_divUniverse) return;
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const { ri, ci } = _divHoverCell;
+    if (ri >= 0 && ci >= 0) drawDivCell(ctx, ri, ci, _divUniverse[ri], false);
+    _divHoverCell = { ri: -1, ci: -1 };
+  });
 }
 
 async function loadDivergence(force = false) {
   const meta = document.getElementById("div-meta");
-  if (_divUniverse && !force) { return; }
+  if (_divUniverse && !force) return;
   meta.textContent = "loading…";
   try {
     const r    = await fetch(DIVERGENCE_URL);
@@ -2578,7 +2601,7 @@ async function loadDivergence(force = false) {
     );
     _divUniverse = univ;
     renderDivCanvas(univ);
-    setupDivHover(univ);
+    if (!_divHoverSetup) { setupDivHover(); _divHoverSetup = true; }
     meta.textContent = univ.length + " tokens · as of " + data.as_of + " · sorted by market cap";
   } catch(e) {
     meta.textContent = "load failed: " + e.message;
