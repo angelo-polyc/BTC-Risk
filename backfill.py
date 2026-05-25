@@ -73,9 +73,27 @@ async def main() -> None:
         )
         print(f"[backfill] universe: {len(universe)} tokens")
 
-        sem = asyncio.Semaphore(20)
+        sem = asyncio.Semaphore(8)
 
-        results = await asyncio.gather(*(pull_history_single(t, sem, api) for t in universe))
+        async def pull_with_timeout(t):
+            try:
+                return await asyncio.wait_for(pull_history_single(t, sem, api), timeout=90)
+            except asyncio.TimeoutError:
+                print(f"[backfill] {t.symbol} timed out at 90s — skipping")
+                return t, {m: [] for m in ["price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol"]}
+            except Exception as e:
+                print(f"[backfill] {t.symbol} unexpected error: {e} — skipping")
+                return t, {m: [] for m in ["price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol"]}
+
+        tasks = [asyncio.create_task(pull_with_timeout(t)) for t in universe]
+        results = []
+        done_count = 0
+        for fut in asyncio.as_completed(tasks):
+            result = await fut
+            results.append(result)
+            done_count += 1
+            if done_count % 20 == 0:
+                print(f"[backfill] progress: {done_count}/{len(universe)}")
 
     # Merge logic: backfill wins if it fetched ≥5 data points for a metric.
     # If backfill got <5 pts (endpoint had no coverage) but existing data has ≥5,
@@ -134,8 +152,14 @@ async def backfill_symbols(symbols: list[str]) -> None:
             return
         print(f"[backfill] selective: {[t.symbol for t in targets]}")
 
-        sem = asyncio.Semaphore(20)
-        results = await asyncio.gather(*(pull_history_single(t, sem, api) for t in targets))
+        sem = asyncio.Semaphore(8)
+        async def pull_with_timeout_s(t):
+            try:
+                return await asyncio.wait_for(pull_history_single(t, sem, api), timeout=90)
+            except Exception as e:
+                print(f"[backfill] {t.symbol} failed: {e}")
+                return t, {m: [] for m in ["price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol"]}
+        results = await asyncio.gather(*(pull_with_timeout_s(t) for t in targets))
 
     DERIVS = {"oi", "funding_apr", "perp_vol", "liq_oi_ratio"}
     updated = 0

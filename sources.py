@@ -75,8 +75,8 @@ class DerivsResult:
 # ---------------------------------------------------------------------------
 
 _retry = retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=1, max=10),
+    stop=stop_after_attempt(2),
+    wait=wait_exponential(multiplier=1, min=2, max=8),
     retry=retry_if_exception_type((httpx.HTTPError, asyncio.TimeoutError)),
     reraise=True,
 )
@@ -109,7 +109,7 @@ class SourceAPI:
 
     async def __aenter__(self) -> "SourceAPI":
         self._client = httpx.AsyncClient(
-            timeout=self._timeout,
+            timeout=httpx.Timeout(connect=10.0, read=20.0, write=10.0, pool=5.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
         return self
