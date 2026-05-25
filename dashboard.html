@@ -645,6 +645,55 @@
     font-size: 10.5px;
     color: var(--ink-softer);
   }
+
+  /* ═══ tab nav ═══ */
+  .tab-nav {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--ink);
+    margin-bottom: 0;
+  }
+  .tab-nav button {
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 7px 18px 9px;
+    font-family: inherit;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-softer);
+    background: transparent;
+    cursor: pointer;
+    margin-bottom: -1px;
+  }
+  .tab-nav button:hover { color: var(--ink); border-bottom-color: var(--rule); }
+  .tab-nav button.active { color: var(--ink); border-bottom-color: var(--ink); }
+
+  /* ═══ divergence tab ═══ */
+  #content-divergence { display: none; }
+  #div-heatmap-wrap {
+    overflow: auto;
+    max-height: 78vh;
+    border: 1px solid var(--rule-soft);
+    border-radius: 2px;
+    background: var(--bg-soft);
+  }
+  #div-heatmap-canvas { display: block; cursor: crosshair; }
+  #div-tooltip {
+    position: fixed;
+    background: var(--ink);
+    color: var(--bg);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    padding: 7px 11px;
+    pointer-events: none;
+    display: none;
+    z-index: 1000;
+    line-height: 1.75;
+    white-space: pre;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  }
 </style>
 </head>
 <body>
@@ -663,6 +712,14 @@
     <div class="hint" title="Close all tabs for btc-risk.replit.app to end the browser session">close tab to sign out</div>
   </div>
 </div>
+
+<!-- ═══ TAB NAV ═══ -->
+<div class="tab-nav">
+  <button id="tab-btn-model" class="active" type="button">Model</button>
+  <button id="tab-btn-divergence" type="button">Divergence Scanner</button>
+</div>
+
+<div id="content-model">
 
 <!-- ═══ SUB-MASTHEAD (freshness strip) ═══ -->
 <div class="sub-masthead">
@@ -794,6 +851,35 @@
   <div class="meta" id="pipeline-meta">—</div>
 </div>
 
+</div><!-- #content-model -->
+
+<!-- ═══ DIVERGENCE SCANNER TAB ═══ -->
+<div id="content-divergence">
+
+<div class="sub-masthead">
+  <div class="kicker">Divergence Scanner · live</div>
+  <div class="summary" id="div-meta">— · awaiting load</div>
+</div>
+
+<section>
+  <div class="section-head">
+    <h2>Full Universe — 30d Rolling Z-Scores</h2>
+    <div class="section-head-right">
+      <div class="meta">sorted by market cap · green = negative z · red = positive z · grey = no data</div>
+      <div class="actions">
+        <button id="btn-div-refresh" type="button">↻ REFRESH</button>
+      </div>
+    </div>
+  </div>
+  <div id="div-heatmap-wrap">
+    <canvas id="div-heatmap-canvas"></canvas>
+  </div>
+</section>
+
+</div><!-- #content-divergence -->
+
+<div id="div-tooltip"></div>
+
 <script>
 /* ============================================================
  * Phase 4 — static panels (hero, drivers, flags, AUC grid,
@@ -811,6 +897,8 @@
 
 const API_TOKEN = "{{BTC_API_TOKEN}}";
 const API_BASE  = "";   /* same-origin; /dashboard is served by the API */
+
+const DIVERGENCE_URL = "https://dud.up.railway.app/divergence.json?x_api_key=88554ffb2c8fb071f37cb6f6b3dced4d5ad8f57c8cbd37e4edad34a7e860edb1";
 const FETCH_TIMEOUT_MS = 20000;
 
 const HYPS = [
@@ -2358,6 +2446,168 @@ function renderAll(summary) {
   renderFallbackStatus();
 }
 
+/* ── Divergence scanner ────────────────────────────────────── */
+
+const DIV_Z_COLS   = ["price_z","price_dz","spot_vol_dz","oi_dz","funding_z","perp_vol_dz","liq_ratio_z","tvl_dz","dex_vol_dz"];
+const DIV_Z_LABELS = ["price\nlvl","price\n24hΔ","spot\nvol","OI","funding","perp\nvol","liq\nratio","TVL","DEX\nvol"];
+const DIV_CELL_H   = 18;
+const DIV_CELL_W   = 64;
+const DIV_LEFT_M   = 70;
+const DIV_TOP_M    = 46;
+
+// --bg #faf8f3=(250,248,243)  --bull #2e6a3b=(46,106,59)  --bear #b5381f=(181,56,31)
+function divZColor(z) {
+  if (z === null || z === undefined || isNaN(z)) return "#dcd7c8";
+  const t = Math.max(-1, Math.min(1, z / 5));
+  if (t < 0) {
+    const s = -t;
+    return "rgb(" + Math.round(250 + (46  - 250) * s) + "," +
+                    Math.round(248 + (106 - 248) * s) + "," +
+                    Math.round(243 + (59  - 243) * s) + ")";
+  } else {
+    return "rgb(" + Math.round(250 + (181 - 250) * t) + "," +
+                    Math.round(248 + (56  - 248) * t) + "," +
+                    Math.round(243 + (31  - 243) * t) + ")";
+  }
+}
+
+let _divUniverse = null;
+
+function renderDivCanvas(universe) {
+  const canvas = document.getElementById("div-heatmap-canvas");
+  const dpr    = window.devicePixelRatio || 1;
+  const W = DIV_LEFT_M + DIV_Z_COLS.length * DIV_CELL_W;
+  const H = DIV_TOP_M  + universe.length  * DIV_CELL_H;
+
+  canvas.style.width  = W + "px";
+  canvas.style.height = H + "px";
+  canvas.width  = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+
+  // Column headers
+  ctx.font = "500 9.5px 'JetBrains Mono', monospace";
+  ctx.fillStyle = "#545450";
+  ctx.textAlign = "center";
+  DIV_Z_LABELS.forEach((label, ci) => {
+    const x = DIV_LEFT_M + ci * DIV_CELL_W + DIV_CELL_W / 2;
+    label.split("\n").forEach((line, li) => {
+      ctx.fillText(line, x, 14 + li * 14);
+    });
+  });
+
+  // Rows
+  universe.forEach((token, ri) => {
+    const y  = DIV_TOP_M + ri * DIV_CELL_H;
+    const zs = token.zscores || {};
+
+    // Symbol label
+    ctx.font = "600 9.5px 'JetBrains Mono', monospace";
+    ctx.fillStyle = "#0e0e0e";
+    ctx.textAlign = "right";
+    ctx.fillText(token.symbol, DIV_LEFT_M - 5, y + DIV_CELL_H * 0.68);
+
+    // Cells
+    DIV_Z_COLS.forEach((col, ci) => {
+      const x = DIV_LEFT_M + ci * DIV_CELL_W;
+      ctx.fillStyle = divZColor(zs[col]);
+      ctx.fillRect(x, y, DIV_CELL_W - 1, DIV_CELL_H - 1);
+    });
+
+    // Divider every 10 rows
+    if ((ri + 1) % 10 === 0) {
+      ctx.fillStyle = "rgba(0,0,0,0.12)";
+      ctx.fillRect(DIV_LEFT_M, y + DIV_CELL_H - 1, DIV_Z_COLS.length * DIV_CELL_W, 1);
+    }
+  });
+}
+
+function setupDivHover(universe) {
+  const canvas  = document.getElementById("div-heatmap-canvas");
+  const tooltip = document.getElementById("div-tooltip");
+
+  canvas.addEventListener("mousemove", e => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const ri = Math.floor((my - DIV_TOP_M)  / DIV_CELL_H);
+    const ci = Math.floor((mx - DIV_LEFT_M) / DIV_CELL_W);
+
+    if (ri < 0 || ri >= universe.length || ci < 0 || ci >= DIV_Z_COLS.length) {
+      tooltip.style.display = "none"; return;
+    }
+    const token = universe[ri];
+    const mcap  = token.market_cap_usd
+      ? "$" + (token.market_cap_usd / 1e9).toFixed(2) + "B" : "—";
+    const lines = [
+      token.symbol + "   " + mcap,
+      "",
+      ...DIV_Z_COLS.map((col, i) => {
+        const v   = (token.zscores || {})[col];
+        const pfx = col === DIV_Z_COLS[ci] ? "▶ " : "  ";
+        const lab = DIV_Z_LABELS[i].replace("\n", " ").padEnd(11);
+        const val = (v !== null && v !== undefined) ? (v >= 0 ? "+" : "") + v.toFixed(2) + "σ" : "—";
+        return pfx + lab + val;
+      })
+    ];
+    tooltip.textContent = lines.join("\n");
+    tooltip.style.display = "block";
+    // Keep tooltip on screen
+    const tx = e.clientX + 16;
+    const ty = e.clientY - 8;
+    tooltip.style.left = tx + "px";
+    tooltip.style.top  = ty + "px";
+  });
+
+  canvas.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+}
+
+async function loadDivergence(force = false) {
+  const meta = document.getElementById("div-meta");
+  if (_divUniverse && !force) { return; }
+  meta.textContent = "loading…";
+  try {
+    const r    = await fetch(DIVERGENCE_URL);
+    if (!r.ok) throw new Error("http " + r.status);
+    const data = await r.json();
+    const univ = [...data.universe].sort(
+      (a, b) => (b.market_cap_usd || 0) - (a.market_cap_usd || 0)
+    );
+    _divUniverse = univ;
+    renderDivCanvas(univ);
+    setupDivHover(univ);
+    meta.textContent = univ.length + " tokens · as of " + data.as_of + " · sorted by market cap";
+  } catch(e) {
+    meta.textContent = "load failed: " + e.message;
+    console.error("[divergence]", e);
+  }
+}
+
+function setupTabs() {
+  const btnModel = document.getElementById("tab-btn-model");
+  const btnDiv   = document.getElementById("tab-btn-divergence");
+  const cModel   = document.getElementById("content-model");
+  const cDiv     = document.getElementById("content-divergence");
+
+  btnModel.addEventListener("click", () => {
+    btnModel.classList.add("active"); btnDiv.classList.remove("active");
+    cModel.style.display = ""; cDiv.style.display = "none";
+  });
+
+  btnDiv.addEventListener("click", () => {
+    btnDiv.classList.add("active"); btnModel.classList.remove("active");
+    cDiv.style.display = ""; cModel.style.display = "none";
+    loadDivergence();
+  });
+
+  document.getElementById("btn-div-refresh").addEventListener("click", () => {
+    loadDivergence(true);
+  });
+}
+
 /* ── Refresh button ────────────────────────────────────────── */
 
 function setRefreshInFlight(inFlight) {
@@ -2381,6 +2631,7 @@ async function refresh() {
 /* ── init ──────────────────────────────────────────────────── */
 
 function init() {
+  setupTabs();
   document.getElementById("btn-refresh").addEventListener("click", refresh);
 
   const now = new Date();
