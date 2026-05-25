@@ -109,7 +109,7 @@ class SourceAPI:
 
     async def __aenter__(self) -> "SourceAPI":
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=5.0, read=15.0, write=5.0, pool=5.0),
+            timeout=httpx.Timeout(connect=5.0, read=30.0, write=5.0, pool=5.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
         return self
@@ -485,7 +485,8 @@ class SourceAPI:
     @_retry
     async def _cglass_get(self, path: str, params: dict | None = None) -> dict:
         headers = {"CG-API-KEY": self._cglass_key} if self._cglass_key else {}
-        r = await self.client.get(f"{CGLASS_BASE}{path}", params=params, headers=headers)
+        r = await self.client.get(f"{CGLASS_BASE}{path}", params=params, headers=headers,
+                                   timeout=httpx.Timeout(connect=5.0, read=15.0, write=5.0, pool=5.0))
         r.raise_for_status()
         return r.json()
 

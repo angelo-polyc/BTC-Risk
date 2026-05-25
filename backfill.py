@@ -70,8 +70,10 @@ async def main() -> None:
         except Exception as e:
             print(f"[backfill] could not load existing data: {e}")
 
+    print("[backfill] starting prep_run")
     async with SourceAPI() as api:
         await api.prep_run()
+        print("[backfill] prep_run done")
 
         universe = await resolve_universe(
             top_n=300,
