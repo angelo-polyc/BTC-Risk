@@ -46,10 +46,19 @@ async def main() -> None:
                 except Exception as e:
                     print(f"[backfill] {t.symbol} price_history failed: {e}")
 
-                # Derivs (oi, funding_apr, perp_vol, liq_oi_ratio) are NOT seeded
-                # by backfill — Coinglass aggregated-history endpoints only cover
-                # ~75 tokens vs the 237+ the daily ingest reaches via coins-markets
-                # + pairs-markets fallback. Derivs history is built by daily ingest.
+                if t.has_coinglass:
+                    try:
+                        for d, oi, fapr, pvol, liqr in await api.derivs_history_30d(t.symbol):
+                            if oi is not None:
+                                metrics["oi"].append({"d": d.isoformat(), "v": oi})
+                            if fapr is not None:
+                                metrics["funding_apr"].append({"d": d.isoformat(), "v": fapr})
+                            if pvol is not None:
+                                metrics["perp_vol"].append({"d": d.isoformat(), "v": pvol})
+                            if liqr is not None:
+                                metrics["liq_oi_ratio"].append({"d": d.isoformat(), "v": liqr})
+                    except Exception as e:
+                        print(f"[backfill] {t.symbol} derivs_history failed: {e}")
 
                 if t.defillama_slug or t.chain_name:
                     try:

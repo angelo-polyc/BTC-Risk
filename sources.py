@@ -529,34 +529,27 @@ class SourceAPI:
         return rows
 
     async def _cglass_funding_history(self, symbol: str, start_ms: int, end_ms: int):
-        """OI-weighted funding history. Tries major exchanges in order until data found."""
-        for exchange in ("Binance", "OKX", "Bybit", "Hyperliquid"):
-            try:
-                r = await self._cglass_get("/api/futures/funding-rate/oi-weight-history",
-                                            params={"exchange": exchange, "symbol": symbol,
-                                                    "interval": "1d", "limit": 35})
-                rows = r.get("data", [])
-                if rows:
-                    for row in rows:
-                        if "close" in row and row["close"] is not None:
-                            row["close"] = float(row["close"])
-                    return rows
-            except Exception:
-                continue
-        return []
+        """OI-weighted funding history. No exchange param — endpoint aggregates all."""
+        r = await self._cglass_get("/api/futures/funding-rate/oi-weight-history",
+                                    params={"symbol": symbol, "interval": "1d", "limit": 35})
+        rows = r.get("data", [])
+        for row in rows:
+            if "close" in row and row["close"] is not None:
+                row["close"] = float(row["close"])
+        return rows
 
     async def _cglass_volume_history(self, symbol: str, start_ms: int, end_ms: int):
+        # futures_spot_volume_ratio doesn't respect limit reliably — pull and slice last 30
         r = await self._cglass_get("/api/futures_spot_volume_ratio",
                                     params={"exchange_list": "Binance,OKX,Bybit",
                                             "symbol": symbol, "interval": "1d",
-                                            "start_time": start_ms, "end_time": end_ms,
-                                            "limit": 35})
-        return r.get("data", [])
+                                            "start_time": start_ms, "end_time": end_ms})
+        return (r.get("data", []) or [])[-35:]
 
     async def _cglass_liq_history(self, symbol: str, start_ms: int, end_ms: int):
         r = await self._cglass_get("/api/futures/liquidation/aggregated-history",
                                     params={"symbol": symbol, "interval": "1d",
-                                            "exchange_list": "Binance,OKX,Bybit",
+                                            "exchange_list": "Binance,OKX,Bybit,Bitget,dYdX,Hyperliquid,Kraken",
                                             "limit": 35})
         out = []
         for row in r.get("data", []):
