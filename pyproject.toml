@@ -1,5 +1,5 @@
 [project]
-name = "divergence-scanner"
+name = "momentum-screener"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
@@ -7,6 +7,8 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "httpx>=0.27",
     "apscheduler>=3.10",
-    "python-dateutil>=2.9",
     "tenacity>=9.0",
+    "pandas>=2.0",
+    "numpy>=1.26",
+    "pyarrow>=14.0",
 ]

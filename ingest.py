@@ -1,164 +1,115 @@
-"""Pull today's metrics, merge into the rolling 30d window, write atomically."""
-import os
-import json
+"""Daily incremental update. Runs 2x/day via APScheduler.
+
+Pulls the last 5 days of data per token, merges new rows into existing parquets,
+trims to retention limits, then recomputes and writes scores.json.
+"""
+from __future__ import annotations
+
 import asyncio
-import statistics
+import os
 from pathlib import Path
-from datetime import date, timedelta
+
+import pandas as pd
 
 from sources import SourceAPI
-from universe import resolve_universe
+from scorer import compute_scores, load_panels, write_scores
+from universe import load_symbols
 
-DATA_FILE = Path(os.environ.get("DATA_DIR", "/data")) / "divergence.json"
-RETENTION_DAYS = 30
-
-EXCLUDE_CATEGORIES = {
-    "Stablecoins", "Wrapped-Tokens", "Liquid-Staked-Tokens",
-    "Real World Assets",
-}
-PRESET_TOKENS: set[str] = set()  # no longer excluded; all watchlist tokens tracked in scanner
+DATA_DIR       = Path(os.environ.get("DATA_DIR", "/data"))
+PRICE_RETENTION = 220   # days kept in spot_prices.parquet
+CVD_RETENTION   = 100   # days kept in taker_buy/sell.parquet
+FUND_RETENTION  = 100   # days kept in funding.parquet
+PULL_DAYS       = 5     # how many recent days to pull per ingest run
 
 
-def load_state() -> dict:
-    if DATA_FILE.exists():
-        return json.loads(DATA_FILE.read_text())
-    return {"as_of": None, "universe": []}
+def _merge(existing: pd.Series, new_bars: list, key: str = "close") -> pd.Series:
+    """Merge new data points into an existing series, dedup by date, sort."""
+    if not new_bars:
+        return existing
+    idx = pd.DatetimeIndex([r.date for r in new_bars])
+    new_s = pd.Series(
+        [getattr(r, key) for r in new_bars],
+        index=idx,
+        dtype=float,
+    )
+    combined = pd.concat([existing, new_s])
+    combined = combined[~combined.index.duplicated(keep="last")]
+    return combined.sort_index()
 
 
-def write_atomic(state: dict) -> None:
-    tmp = DATA_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, separators=(",", ":")))
-    tmp.replace(DATA_FILE)
+def _trim(df: pd.DataFrame, keep_days: int) -> pd.DataFrame:
+    if df.empty:
+        return df
+    cutoff = df.index[-1] - pd.Timedelta(days=keep_days)
+    return df[df.index >= cutoff]
 
 
-_MIN_POINTS = 5
-
-
-def _vals(series: list) -> list[float]:
-    return [r["v"] for r in sorted(series, key=lambda r: r["d"]) if r.get("v") is not None]
-
-
-def _level_z(values: list[float]) -> float | None:
-    if len(values) < _MIN_POINTS:
-        return None
-    sd = statistics.pstdev(values)
-    if sd == 0:
-        return None
-    return round((values[-1] - statistics.mean(values)) / sd, 2)
-
-
-def _delta_z(values: list[float]) -> float | None:
-    if len(values) < _MIN_POINTS + 1:
-        return None
-    pct = [(values[i] - values[i - 1]) / values[i - 1]
-           for i in range(1, len(values)) if values[i - 1] != 0]
-    if len(pct) < _MIN_POINTS:
-        return None
-    sd = statistics.pstdev(pct)
-    if sd == 0:
-        return None
-    return round((pct[-1] - statistics.mean(pct)) / sd, 2)
-
-
-def compute_zscores(metrics: dict) -> dict:
-    def z(metric, kind):
-        v = _vals(metrics.get(metric, []))
-        return _level_z(v) if kind == "level" else _delta_z(v)
-
-    return {
-        "price_z":      z("price",        "level"),
-        "price_dz":     z("price",        "delta"),
-        "spot_vol_dz":  z("spot_vol",     "delta"),
-        "oi_dz":        z("oi",           "delta"),
-        "funding_z":    z("funding_apr",  "level"),
-        "perp_vol_dz":  z("perp_vol",     "delta"),
-        "liq_ratio_z":  z("liq_oi_ratio", "level"),
-        "tvl_dz":       z("tvl",          "delta"),
-        "dex_vol_dz":   z("dex_vol",      "delta"),
-    }
-
-
-def merge_metric_series(existing: list, today: date, value: float | None) -> list:
-    today_str = today.isoformat()
-    cutoff = (today - timedelta(days=RETENTION_DAYS)).isoformat()
-    series = [r for r in existing if r["d"] != today_str and r["d"] >= cutoff]
-    if value is not None:
-        series.append({"d": today_str, "v": value})
-    series.sort(key=lambda r: r["d"])
-    return series
+def _load_or_empty(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame()
+    df = pd.read_parquet(path)
+    df.index = pd.to_datetime(df.index).tz_localize(None)
+    return df.sort_index()
 
 
 async def run_ingest() -> None:
-    today = date.today()
-    print(f"[ingest] starting for {today}")
-    state = load_state()
-    existing_by_id = {t["id"]: t for t in state.get("universe", [])}
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    symbols = load_symbols()
+    print(f"[ingest] starting — {len(symbols)} symbols")
+
+    # Load existing panels
+    prices_df = _load_or_empty(DATA_DIR / "spot_prices.parquet")
+    buy_df    = _load_or_empty(DATA_DIR / "taker_buy.parquet")
+    sell_df   = _load_or_empty(DATA_DIR / "taker_sell.parquet")
+    fund_df   = _load_or_empty(DATA_DIR / "funding.parquet")
 
     async with SourceAPI() as api:
-        await api.prep_run()
+        await api.warm_supported()
 
-        universe = await resolve_universe(
-            top_n=300,
-            exclude_categories=EXCLUDE_CATEGORIES,
-            exclude_tokens=PRESET_TOKENS,
-            api=api,
-        )
-        print(f"[ingest] universe size: {len(universe)}")
+        sem = asyncio.Semaphore(8)
 
-        await api._batch_fetch_prices([t.id for t in universe])
-
-        sem = asyncio.Semaphore(20)
-
-        async def pull(t):
-            out = {
-                "price": None, "spot_vol": None, "oi": None, "funding_apr": None,
-                "perp_vol": None, "liq_oi_ratio": None, "tvl": None, "dex_vol": None,
-            }
+        async def pull(sym: str):
             async with sem:
-                px, vol = await api.price_volume(t.id)
-                out["price"] = px
-                out["spot_vol"] = vol
+                prices  = await api.spot_history(sym,    limit=PULL_DAYS)
+                cvd     = await api.cvd_history(sym,     limit=PULL_DAYS)
+                funding = await api.funding_history(sym, limit=PULL_DAYS)
+                return sym, prices, cvd, funding
 
-                if t.has_coinglass:
-                    derivs = await api.derivatives(t.symbol)
-                    if derivs:
-                        out["oi"] = derivs.oi
-                        out["funding_apr"] = derivs.funding_apr
-                        out["perp_vol"] = derivs.perp_vol
-                        out["liq_oi_ratio"] = derivs.liq_oi_ratio
+        results = await asyncio.gather(*(pull(s) for s in symbols))
 
-                # TVL and DEX vol: DefiLlama for both protocol and chain tokens
-                # (consistent with backfill — no CG tickers dex_vol)
-                if t.defillama_slug or t.chain_name:
-                    tvl, dexv = await api.protocol(t.defillama_slug, t.chain_name)
-                    out["tvl"] = tvl
-                    out["dex_vol"] = dexv
+    # Merge new data into panels
+    for sym, prices, cvd, funding in results:
+        if prices:
+            existing = prices_df[sym] if sym in prices_df.columns else pd.Series(dtype=float)
+            prices_df[sym] = _merge(existing, prices, "close")
+        if cvd:
+            ex_buy  = buy_df[sym]  if sym in buy_df.columns  else pd.Series(dtype=float)
+            ex_sell = sell_df[sym] if sym in sell_df.columns else pd.Series(dtype=float)
+            buy_df[sym]  = _merge(ex_buy,  cvd, "buy")
+            sell_df[sym] = _merge(ex_sell, cvd, "sell")
+        if funding:
+            ex_fund = fund_df[sym] if sym in fund_df.columns else pd.Series(dtype=float)
+            fund_df[sym] = _merge(ex_fund, funding, "close")
 
-            return t, out
+    # Trim to retention limits and save
+    prices_df = _trim(prices_df.sort_index(), PRICE_RETENTION)
+    buy_df    = _trim(buy_df.sort_index(),    CVD_RETENTION)
+    sell_df   = _trim(sell_df.sort_index(),   CVD_RETENTION)
+    fund_df   = _trim(fund_df.sort_index(),   FUND_RETENTION)
 
-        results = await asyncio.gather(*(pull(t) for t in universe))
+    prices_df.to_parquet(DATA_DIR / "spot_prices.parquet")
+    buy_df.to_parquet(DATA_DIR   / "taker_buy.parquet")
+    sell_df.to_parquet(DATA_DIR  / "taker_sell.parquet")
+    fund_df.to_parquet(DATA_DIR  / "funding.parquet")
 
-    new_universe = []
-    for t, today_metrics in results:
-        existing = existing_by_id.get(t.id, {"metrics": {m: [] for m in today_metrics}})
-        merged = {
-            metric: merge_metric_series(
-                existing.get("metrics", {}).get(metric, []), today, val
-            )
-            for metric, val in today_metrics.items()
-        }
-        new_universe.append({
-            "id": t.id,
-            "symbol": t.symbol,
-            "rank": t.rank,
-            "defillama_slug": t.defillama_slug,
-            "chain_name": t.chain_name,
-            "coinglass_coverage": t.has_coinglass,
-            "metrics": merged,
-            "zscores": compute_zscores(merged),
-        })
+    print(f"[ingest] saved panels — prices={prices_df.shape} cvd_buy={buy_df.shape}")
 
-    state = {"as_of": today.isoformat(), "universe": new_universe}
-    write_atomic(state)
-    size_kb = DATA_FILE.stat().st_size // 1024
-    print(f"[ingest] wrote {DATA_FILE} — {len(new_universe)} tokens, ~{size_kb}KB")
+    # Recompute scores
+    try:
+        scores = compute_scores(prices_df, buy_df, sell_df)
+        write_scores(scores, DATA_DIR)
+    except Exception as e:
+        print(f"[ingest] scoring failed: {e}")
+        raise
+
+    print("[ingest] done")
