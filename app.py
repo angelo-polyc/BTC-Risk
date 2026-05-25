@@ -10,7 +10,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from ingest import run_ingest
-from backfill import main as run_backfill, backfill_symbols
+from backfill import main as run_backfill, backfill_symbols, progress as backfill_progress
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 DATA_FILE = DATA_DIR / "divergence.json"
@@ -86,20 +86,10 @@ async def manual_ingest(x_api_key: str | None = None):
 
 @app.get("/checkpoint")
 async def checkpoint_status(x_api_key: str | None = None):
-    """Read the in-progress .tmp checkpoint file — shows backfill progress."""
+    """Live backfill progress — reads in-memory Progress object."""
     if API_KEY and x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="unauthorized")
-    tmp = DATA_FILE.with_suffix(".tmp")
-    if not tmp.exists():
-        return {"status": "no checkpoint", "oi": 0, "tokens": 0}
-    d = json.loads(tmp.read_text())
-    u = d.get("universe", [])
-    return {
-        "status": "in_progress",
-        "tokens_so_far": len(u),
-        "oi": sum(1 for t in u if t["metrics"].get("oi")),
-        "tvl": sum(1 for t in u if t["metrics"].get("tvl")),
-    }
+    return backfill_progress.to_dict()
 
 @app.post("/backfill")
 async def manual_backfill(x_api_key: str | None = None, symbol: str | None = None):

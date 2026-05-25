@@ -1,216 +1,362 @@
-"""One-shot 30d history loader. Run once after first deploy to seed the JSON."""
+"""Backfill orchestrator — v2 design with token-bucket rate limiting.
+
+Public surface (app.py compatibility):
+    main()            — alias for run_backfill(), fire-and-forget entry point
+    run_backfill()    — full backfill, returns payload dict
+    backfill_symbols() — selective single-symbol backfill (existing endpoint)
+    progress          — module-level Progress for /checkpoint endpoint
+"""
+from __future__ import annotations
+
 import asyncio
 import json
-from datetime import date
+import logging
+import os
+import time
+from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Optional
 
-from sources import SourceAPI
-from universe import resolve_universe
-from ingest import DATA_FILE, EXCLUDE_CATEGORIES, PRESET_TOKENS, compute_zscores
+import httpx
+
+from bf_http import request_json
+from bf_io import atomic_write, index_existing, load_existing, merge_metric, write_progress_snapshot
+from bf_series import coerce_float, iso_day, last_n
+from bf_sources import (
+    fetch_coingecko,
+    fetch_coinglass_funding_apr,
+    fetch_coinglass_liq_oi_ratio,
+    fetch_coinglass_oi,
+    fetch_coinglass_perp_vol,
+    fetch_llama_dex_vol,
+    fetch_llama_tvl,
+)
+from bf_zscores import compute_zscores
+from ingest import DATA_FILE, EXCLUDE_CATEGORIES, PRESET_TOKENS
+from ratelimit import TokenBucket
+
+LOG = logging.getLogger("divergence.backfill")
+
+# ── tunables ──────────────────────────────────────────────────────────────────
+
+UNIVERSE_URL = (
+    "https://dud.up.railway.app/divergence.json"
+    "?x_api_key=88554ffb2c8fb071f37cb6f6b3dced4d5ad8f57c8cbd37e4edad34a7e860edb1"
+)
+
+TOKEN_CONCURRENCY   = 12
+COINGECKO_CONCURRENCY = 4
+COINGLASS_CONCURRENCY = 6
+LLAMA_CONCURRENCY   = 8
+
+COINGLASS_RATE  = 300.0 / 60.0 * 0.85   # ~4.25 rps
+COINGECKO_RATE  = 8.0
+COINGLASS_BURST = 8.0
+COINGECKO_BURST = 12.0
+
+TOKEN_TIMEOUT_S        = 75.0
+PROGRESS_SNAPSHOT_EVERY = 5
+HTTP_LIMITS = httpx.Limits(
+    max_connections=40,
+    max_keepalive_connections=20,
+    keepalive_expiry=30.0,
+)
+
+# ── progress tracking ─────────────────────────────────────────────────────────
+
+@dataclass
+class Progress:
+    state: str = "idle"
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    total: int = 0
+    processed: int = 0
+    failed: int = 0
+    in_flight: set[str] = field(default_factory=set)
+    last_error: Optional[str] = None
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+
+    def to_dict(self) -> dict:
+        return {
+            "state": self.state,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "total": self.total,
+            "processed": self.processed,
+            "failed": self.failed,
+            "in_flight": sorted(self.in_flight),
+            "last_error": self.last_error,
+        }
 
 
-def _checkpoint(out_universe: list) -> None:
-    """Write partial results to .tmp file — promoted to final on completion."""
-    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    state = {"as_of": date.today().isoformat(), "universe": out_universe}
-    tmp = DATA_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, separators=(",", ":")))
+progress = Progress()
+
+# ── per-token fetch ───────────────────────────────────────────────────────────
+
+async def _fetch_one_token(
+    token: dict,
+    client: httpx.AsyncClient,
+    *,
+    cg_sem: asyncio.Semaphore,
+    cgl_sem: asyncio.Semaphore,
+    llama_sem: asyncio.Semaphore,
+    cg_bucket: TokenBucket,
+    cgl_bucket: TokenBucket,
+    coingecko_key: str,
+    coinglass_key: str,
+) -> dict[str, list[dict]]:
+    coin_id = token["id"]
+    symbol = token["symbol"]
+    has_cgl = bool(token.get("coinglass_coverage"))
+    llama_slug = token.get("defillama_slug")
+    chain_name = token.get("chain_name")
+    has_llama = bool(llama_slug or chain_name)
+
+    cg_task = asyncio.create_task(
+        fetch_coingecko(client, cg_sem, coin_id, coingecko_key, bucket=cg_bucket)
+    )
+    oi_task = funding_task = perp_task = None
+    if has_cgl:
+        oi_task      = asyncio.create_task(fetch_coinglass_oi(client, cgl_sem, symbol, coinglass_key, bucket=cgl_bucket))
+        funding_task = asyncio.create_task(fetch_coinglass_funding_apr(client, cgl_sem, symbol, coinglass_key, bucket=cgl_bucket))
+        perp_task    = asyncio.create_task(fetch_coinglass_perp_vol(client, cgl_sem, symbol, coinglass_key, bucket=cgl_bucket))
+
+    tvl_task = dex_task = None
+    if has_llama:
+        tvl_task = asyncio.create_task(fetch_llama_tvl(client, llama_sem, defillama_slug=llama_slug, chain_name=chain_name))
+        dex_task = asyncio.create_task(fetch_llama_dex_vol(client, llama_sem, defillama_slug=llama_slug, chain_name=chain_name))
+
+    price, spot_vol = await cg_task
+
+    oi: list[dict] = []
+    if oi_task is not None:
+        oi = await oi_task
+    liq_task = None
+    if has_cgl:
+        liq_task = asyncio.create_task(
+            fetch_coinglass_liq_oi_ratio(client, cgl_sem, symbol, coinglass_key, oi, bucket=cgl_bucket)
+        )
+
+    funding_apr   = await funding_task if funding_task else []
+    perp_vol      = await perp_task    if perp_task    else []
+    liq_oi_ratio  = await liq_task     if liq_task     else []
+    tvl           = await tvl_task     if tvl_task     else []
+    dex_vol       = await dex_task     if dex_task     else []
+
+    return {
+        "price": price, "spot_vol": spot_vol,
+        "oi": oi, "funding_apr": funding_apr,
+        "perp_vol": perp_vol, "liq_oi_ratio": liq_oi_ratio,
+        "tvl": tvl, "dex_vol": dex_vol,
+    }
 
 
-async def pull_history_single(t, sem: asyncio.Semaphore, api) -> tuple:
-    """Fetch 30d history for a single token. Shared by full and selective backfill."""
-    metrics: dict[str, list] = {m: [] for m in
-        ["price", "spot_vol", "oi", "funding_apr", "perp_vol", "liq_oi_ratio", "tvl", "dex_vol"]}
-    async with sem:
-        try:
-            for d, px, vol in await api.price_history_30d(t.id):
-                metrics["price"].append({"d": d.isoformat(), "v": px})
-                metrics["spot_vol"].append({"d": d.isoformat(), "v": vol})
-        except Exception as e:
-            _log(f"[backfill] {t.symbol} price_history failed: {e}")
+# ── orchestration ─────────────────────────────────────────────────────────────
 
-        if t.has_coinglass:
-            try:
-                for d, oi, fapr, pvol, liqr in await api.derivs_history_30d(t.symbol):
-                    if oi is not None:
-                        metrics["oi"].append({"d": d.isoformat(), "v": oi})
-                    if fapr is not None:
-                        metrics["funding_apr"].append({"d": d.isoformat(), "v": fapr})
-                    if pvol is not None:
-                        metrics["perp_vol"].append({"d": d.isoformat(), "v": pvol})
-                    if liqr is not None:
-                        metrics["liq_oi_ratio"].append({"d": d.isoformat(), "v": liqr})
-            except Exception as e:
-                _log(f"[backfill] {t.symbol} derivs_history failed: {e}")
-
-        if t.defillama_slug or t.chain_name:
-            try:
-                for d, tvl, dexv in await api.protocol_history_30d(t.defillama_slug, t.chain_name):
-                    if tvl is not None:
-                        metrics["tvl"].append({"d": d.isoformat(), "v": tvl})
-                    if dexv is not None:
-                        metrics["dex_vol"].append({"d": d.isoformat(), "v": dexv})
-            except Exception as e:
-                _log(f"[backfill] {t.symbol} protocol_history failed: {e}")
-
-    _log(f"[backfill] {t.symbol} — price={len(metrics['price'])} oi={len(metrics['oi'])} "
-          f"tvl={len(metrics['tvl'])} dex_vol={len(metrics['dex_vol'])}")
-    return t, metrics
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-LOG_FILE = DATA_FILE.parent / "backfill.log"
+async def _fetch_universe_remote(client: httpx.AsyncClient) -> Optional[list[dict]]:
+    body = await request_json(client, UNIVERSE_URL)
+    if isinstance(body, dict):
+        u = body.get("universe")
+        if isinstance(u, list) and u:
+            return u
+    return None
 
 
-def _log(msg: str) -> None:
-    from datetime import datetime
-    line = f"{datetime.utcnow().isoformat()} {msg}\n"
-    print(line.strip())
-    for path in (LOG_FILE, Path("/tmp/backfill.log")):
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "a") as f:
-                f.write(line)
-        except Exception:
-            pass
-
-
-async def main() -> None:
-    # Load existing data — backfill will preserve ingest-built derivs series
-    # where the history endpoints return sparse results
-    existing_by_id: dict = {}
-    if DATA_FILE.exists():
-        try:
-            old = json.loads(DATA_FILE.read_text())
-            existing_by_id = {t["id"]: t for t in old.get("universe", [])}
-            _log(f"[backfill] loaded {len(existing_by_id)} existing tokens to merge")
-        except Exception as e:
-            _log(f"[backfill] could not load existing data: {e}")
-
-    _log("[backfill] starting prep_run")
+async def _fetch_universe_local() -> list[dict]:
+    """Fallback: resolve universe locally (fresh deploy with no data yet)."""
+    from sources import SourceAPI
+    from universe import resolve_universe
     async with SourceAPI() as api:
         await api.prep_run()
-        _log("[backfill] prep_run done")
+        tokens = await resolve_universe(
+            top_n=300,
+            exclude_categories=EXCLUDE_CATEGORIES,
+            exclude_tokens=PRESET_TOKENS,
+            api=api,
+        )
+    return [
+        {
+            "id": t.id, "symbol": t.symbol, "rank": t.rank,
+            "defillama_slug": t.defillama_slug, "chain_name": t.chain_name,
+            "coinglass_coverage": t.has_coinglass,
+        }
+        for t in tokens
+    ]
 
+
+async def _process_token(
+    token: dict,
+    *,
+    existing_idx: dict,
+    client: httpx.AsyncClient,
+    cg_sem, cgl_sem, llama_sem,
+    cg_bucket, cgl_bucket,
+    coingecko_key: str,
+    coinglass_key: str,
+) -> dict:
+    coin_id = token["id"]
+    async with progress._lock:
+        progress.in_flight.add(coin_id)
+    try:
         try:
-            universe = await resolve_universe(
-                top_n=300,
-                exclude_categories=EXCLUDE_CATEGORIES,
-                exclude_tokens=PRESET_TOKENS,
-                api=api,
+            fetched = await asyncio.wait_for(
+                _fetch_one_token(
+                    token, client,
+                    cg_sem=cg_sem, cgl_sem=cgl_sem, llama_sem=llama_sem,
+                    cg_bucket=cg_bucket, cgl_bucket=cgl_bucket,
+                    coingecko_key=coingecko_key, coinglass_key=coinglass_key,
+                ),
+                timeout=TOKEN_TIMEOUT_S,
             )
-        except Exception as e:
-            _log(f"[backfill] resolve_universe FAILED: {type(e).__name__}: {e}")
-            return
-        _log(f"[backfill] universe: {len(universe)} tokens")
+        except asyncio.TimeoutError:
+            LOG.warning("token timeout id=%s", coin_id)
+            fetched = {k: [] for k in ("price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol")}
+            async with progress._lock:
+                progress.failed += 1
+                progress.last_error = f"timeout:{coin_id}"
+        except Exception as exc:
+            LOG.exception("token failed id=%s", coin_id)
+            fetched = {k: [] for k in ("price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol")}
+            async with progress._lock:
+                progress.failed += 1
+                progress.last_error = f"{coin_id}:{exc!r}"[:200]
 
-        # Sequential per-token with 1s pacing — avoids burst that triggers
-        # Coinglass edge throttling (black-holes connections, not 429s).
-        # 4 calls per token fire in parallel inside pull_history_single.
-        # ~4 req/sec sustained → 237 Coinglass tokens × 1s = ~4 min.
-        sem = asyncio.Semaphore(4)  # caps the 4 parallel calls per token
-        DERIVS = {"oi", "funding_apr", "perp_vol", "liq_oi_ratio"}
-        out_universe = []
+        prior = existing_idx.get(coin_id, {})
+        prior_metrics = prior.get("metrics", {}) if isinstance(prior, dict) else {}
+        merged = {
+            name: merge_metric(fetched.get(name, []), prior_metrics.get(name, []) or [])
+            for name in ("price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol")
+        }
 
-        def _merge_and_append(t, metrics):
-            existing = existing_by_id.get(t.id, {})
-            existing_metrics = existing.get("metrics", {})
-            final_metrics = dict(metrics)
-            for m in DERIVS:
-                bf_pts = len(final_metrics.get(m) or [])
-                ex_pts = len(existing_metrics.get(m) or [])
-                if bf_pts < 5 and ex_pts >= 5:
-                    final_metrics[m] = existing_metrics[m]
-            out_universe.append({
-                "id": t.id, "symbol": t.symbol, "rank": t.rank,
-                "defillama_slug": t.defillama_slug, "chain_name": t.chain_name,
-                "coinglass_coverage": t.has_coinglass,
-                "metrics": final_metrics, "zscores": compute_zscores(final_metrics),
-            })
+        return {
+            "id": coin_id,
+            "symbol": token.get("symbol"),
+            "rank": token.get("rank"),
+            "defillama_slug": token.get("defillama_slug"),
+            "chain_name": token.get("chain_name"),
+            "coinglass_coverage": bool(token.get("coinglass_coverage")),
+            "metrics": merged,
+            "zscores": compute_zscores(merged),
+        }
+    finally:
+        async with progress._lock:
+            progress.in_flight.discard(coin_id)
+            progress.processed += 1
+            if progress.processed % PROGRESS_SNAPSHOT_EVERY == 0:
+                write_progress_snapshot(progress.to_dict())
 
-        for i, t in enumerate(universe):
-            try:
-                _, metrics = await asyncio.wait_for(
-                    pull_history_single(t, sem, api), timeout=45
+
+async def run_backfill(
+    *,
+    coingecko_key: Optional[str] = None,
+    coinglass_key: Optional[str] = None,
+    universe: Optional[list[dict]] = None,
+    token_limit: Optional[int] = None,
+) -> dict:
+    """Full backfill. Returns written payload."""
+    coingecko_key = coingecko_key or os.environ.get("COINGECKO_API_KEY", "")
+    coinglass_key = coinglass_key or os.environ.get("COINGLASS_API_KEY", "")
+    if not coingecko_key:
+        raise RuntimeError("COINGECKO_API_KEY missing")
+    if not coinglass_key:
+        raise RuntimeError("COINGLASS_API_KEY missing")
+
+    async with progress._lock:
+        progress.state = "running"
+        progress.started_at = _now_iso()
+        progress.finished_at = None
+        progress.total = 0
+        progress.processed = 0
+        progress.failed = 0
+        progress.in_flight.clear()
+        progress.last_error = None
+
+    existing = load_existing()
+    existing_idx = index_existing(existing)
+
+    cg_sem    = asyncio.Semaphore(COINGECKO_CONCURRENCY)
+    cgl_sem   = asyncio.Semaphore(COINGLASS_CONCURRENCY)
+    llama_sem = asyncio.Semaphore(LLAMA_CONCURRENCY)
+    token_sem = asyncio.Semaphore(TOKEN_CONCURRENCY)
+    cg_bucket  = TokenBucket(rate_per_sec=COINGECKO_RATE,  capacity=COINGECKO_BURST)
+    cgl_bucket = TokenBucket(rate_per_sec=COINGLASS_RATE, capacity=COINGLASS_BURST)
+
+    timeout = httpx.Timeout(connect=10.0, read=15.0, write=10.0, pool=30.0)
+    async with httpx.AsyncClient(limits=HTTP_LIMITS, timeout=timeout) as client:
+        if universe is None:
+            universe = await _fetch_universe_remote(client)
+            if not universe:
+                LOG.warning("remote universe fetch failed, falling back to local resolve")
+                universe = await _fetch_universe_local()
+        if token_limit:
+            universe = universe[:token_limit]
+
+        async with progress._lock:
+            progress.total = len(universe)
+
+        async def worker(tok: dict) -> dict:
+            async with token_sem:
+                return await _process_token(
+                    tok, existing_idx=existing_idx, client=client,
+                    cg_sem=cg_sem, cgl_sem=cgl_sem, llama_sem=llama_sem,
+                    cg_bucket=cg_bucket, cgl_bucket=cgl_bucket,
+                    coingecko_key=coingecko_key, coinglass_key=coinglass_key,
                 )
-            except asyncio.TimeoutError:
-                _log(f"[backfill] {t.symbol} timed out at 45s — skipping")
-                metrics = {m: [] for m in ["price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol"]}
-            except Exception as e:
-                _log(f"[backfill] {t.symbol} failed: {e}")
-                metrics = {m: [] for m in ["price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol"]}
-            _merge_and_append(t, metrics)
 
-            # Checkpoint every 25 tokens so a crash doesn't lose all work
-            if (i + 1) % 25 == 0:
-                _log(f"[backfill] checkpoint {i+1}/{len(universe)}")
-                _checkpoint(out_universe)
+        t0 = time.monotonic()
+        results = await asyncio.gather(
+            *(worker(t) for t in universe), return_exceptions=True,
+        )
+        elapsed = time.monotonic() - t0
 
-            # 1s pace between tokens → ~4 req/sec sustained
-            if t.has_coinglass:
-                await asyncio.sleep(1.0)
+    # Filter out any unexpected exceptions from gather
+    clean = [r for r in results if isinstance(r, dict)]
+    payload = {
+        "as_of": date.today().isoformat(),
+        "universe": clean,
+    }
+    atomic_write(payload)
 
-    _checkpoint(out_universe)
-    # Promote checkpoint to final file
-    tmp = DATA_FILE.with_suffix(".tmp")
-    if tmp.exists():
-        tmp.replace(DATA_FILE)
-    size_kb = DATA_FILE.stat().st_size // 1024
-    _log(f"[backfill] complete — {len(out_universe)} tokens, ~{size_kb}KB → {DATA_FILE}")
+    async with progress._lock:
+        progress.state = "complete"
+        progress.finished_at = _now_iso()
+        write_progress_snapshot(progress.to_dict())
 
+    LOG.info("backfill done tokens=%d failed=%d elapsed=%.1fs", len(clean), progress.failed, elapsed)
+    return payload
+
+
+# app.py compatibility alias
+main = run_backfill
+
+
+# ── selective single-token backfill (POST /backfill?symbol=X) ─────────────────
 
 async def backfill_symbols(symbols: list[str]) -> None:
-    """Backfill specific tokens by symbol (e.g. ['BTC', 'ETH']).
-    Merges into existing data — only updates the matched tokens."""
+    """Backfill specific tokens by symbol. Merges into existing data."""
     if not DATA_FILE.exists():
-        _log(f"[backfill] no data file, run full backfill first")
+        LOG.warning("no data file, run full backfill first")
         return
 
     syms = {s.upper() for s in symbols}
     existing_state = json.loads(DATA_FILE.read_text())
     existing_by_id = {t["id"]: t for t in existing_state.get("universe", [])}
-    existing_by_sym = {t["symbol"].upper(): t["id"] for t in existing_state.get("universe", [])}
+    universe_list = [t for t in existing_state.get("universe", []) if t.get("symbol", "").upper() in syms]
 
-    async with SourceAPI() as api:
-        await api.prep_run()
-        universe = await resolve_universe(
-            top_n=300, exclude_categories=EXCLUDE_CATEGORIES,
-            exclude_tokens=PRESET_TOKENS, api=api,
-        )
-        targets = [t for t in universe if t.symbol.upper() in syms]
-        if not targets:
-            _log(f"[backfill] no matching tokens found for {syms}")
-            return
-        _log(f"[backfill] selective: {[t.symbol for t in targets]}")
+    if not universe_list:
+        LOG.warning("no matching tokens found for %s", syms)
+        return
 
-        sem = asyncio.Semaphore(20)
-        results = await asyncio.gather(*(pull_history_single(t, sem, api) for t in targets))
-
-    DERIVS = {"oi", "funding_apr", "perp_vol", "liq_oi_ratio"}
-    updated = 0
-    for t, metrics in results:
-        existing = existing_by_id.get(t.id, {})
-        existing_metrics = existing.get("metrics", {})
-        final_metrics = dict(metrics)
-        for m in DERIVS:
-            bf_pts = len(final_metrics.get(m) or [])
-            ex_pts = len(existing_metrics.get(m) or [])
-            if bf_pts < 5 and ex_pts >= 5:
-                final_metrics[m] = existing_metrics[m]
-        existing_by_id[t.id] = {
-            "id": t.id, "symbol": t.symbol, "rank": t.rank,
-            "defillama_slug": t.defillama_slug, "chain_name": t.chain_name,
-            "coinglass_coverage": t.has_coinglass,
-            "metrics": final_metrics, "zscores": compute_zscores(final_metrics),
-        }
-        updated += 1
-
-    out = list(existing_by_id.values())
-    state = {"as_of": existing_state.get("as_of", date.today().isoformat()), "universe": out}
-    tmp = DATA_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, separators=(",", ":")))
-    tmp.replace(DATA_FILE)
-    _log(f"[backfill] selective complete — updated {updated} tokens")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    coingecko_key = os.environ.get("COINGECKO_API_KEY", "")
+    coinglass_key = os.environ.get("COINGLASS_API_KEY", "")
+    result = await run_backfill(
+        coingecko_key=coingecko_key,
+        coinglass_key=coinglass_key,
+        universe=universe_list,
+    )
+    LOG.info("selective backfill complete for %s", syms)
