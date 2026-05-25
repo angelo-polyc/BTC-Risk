@@ -21,34 +21,43 @@ async def main() -> None:
         )
         print(f"[backfill] universe: {len(universe)} tokens")
 
-        sem = asyncio.Semaphore(4)
+        sem = asyncio.Semaphore(20)
 
         async def pull_history(t):
             metrics: dict[str, list] = {m: [] for m in
                 ["price", "spot_vol", "oi", "funding_apr", "perp_vol",
                  "liq_oi_ratio", "tvl", "dex_vol"]}
             async with sem:
-                for d, px, vol in await api.price_history_30d(t.id):
-                    metrics["price"].append({"d": d.isoformat(), "v": px})
-                    metrics["spot_vol"].append({"d": d.isoformat(), "v": vol})
+                try:
+                    for d, px, vol in await api.price_history_30d(t.id):
+                        metrics["price"].append({"d": d.isoformat(), "v": px})
+                        metrics["spot_vol"].append({"d": d.isoformat(), "v": vol})
+                except Exception as e:
+                    print(f"[backfill] {t.symbol} price_history failed: {e}")
 
                 if t.has_coinglass:
-                    for d, oi, fapr, pvol, liqr in await api.derivs_history_30d(t.symbol):
-                        if oi is not None:
-                            metrics["oi"].append({"d": d.isoformat(), "v": oi})
-                        if fapr is not None:
-                            metrics["funding_apr"].append({"d": d.isoformat(), "v": fapr})
-                        if pvol is not None:
-                            metrics["perp_vol"].append({"d": d.isoformat(), "v": pvol})
-                        if liqr is not None:
-                            metrics["liq_oi_ratio"].append({"d": d.isoformat(), "v": liqr})
+                    try:
+                        for d, oi, fapr, pvol, liqr in await api.derivs_history_30d(t.symbol):
+                            if oi is not None:
+                                metrics["oi"].append({"d": d.isoformat(), "v": oi})
+                            if fapr is not None:
+                                metrics["funding_apr"].append({"d": d.isoformat(), "v": fapr})
+                            if pvol is not None:
+                                metrics["perp_vol"].append({"d": d.isoformat(), "v": pvol})
+                            if liqr is not None:
+                                metrics["liq_oi_ratio"].append({"d": d.isoformat(), "v": liqr})
+                    except Exception as e:
+                        print(f"[backfill] {t.symbol} derivs_history failed: {e}")
 
                 if t.defillama_slug or t.chain_name:
-                    for d, tvl, dexv in await api.protocol_history_30d(t.defillama_slug, t.chain_name):
-                        if tvl is not None:
-                            metrics["tvl"].append({"d": d.isoformat(), "v": tvl})
-                        if dexv is not None:
-                            metrics["dex_vol"].append({"d": d.isoformat(), "v": dexv})
+                    try:
+                        for d, tvl, dexv in await api.protocol_history_30d(t.defillama_slug, t.chain_name):
+                            if tvl is not None:
+                                metrics["tvl"].append({"d": d.isoformat(), "v": tvl})
+                            if dexv is not None:
+                                metrics["dex_vol"].append({"d": d.isoformat(), "v": dexv})
+                    except Exception as e:
+                        print(f"[backfill] {t.symbol} protocol_history failed: {e}")
 
             print(f"[backfill] {t.symbol} — "
                   f"price={len(metrics['price'])} oi={len(metrics['oi'])} "

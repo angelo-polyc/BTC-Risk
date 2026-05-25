@@ -101,7 +101,8 @@ class SourceAPI:
 
         self._cglass_today: dict[str, dict] = {}
         self._llama_protocols: dict[str, str] = {}
-        self._llama_chains: dict[str, float] = {}   # chain_name → current TVL
+        self._llama_chains: dict[str, float] = {}       # chain_name → current TVL (ingest)
+        self._llama_chain_hist: dict[str, list] = {}    # chain_name → history (backfill cache)
         self._cglass_supported: set[str] = set()
         self._price_cache: dict[str, float] = {}
         self._tickers_sem = asyncio.Semaphore(3)
@@ -656,17 +657,22 @@ class SourceAPI:
         return r.get("tvl") or []
 
     async def _llama_chain_tvl_history(self, chain_name: str) -> list[dict]:
-        """30d chain TVL history. Returns [{date: ts, tvl: v}, ...]."""
+        """30d chain TVL history. Cached — each chain fetched only once per run."""
+        if chain_name in self._llama_chain_hist:
+            return self._llama_chain_hist[chain_name]
         for name in (chain_name, chain_name.title()):
             try:
                 r = await self._llama_get(f"/v2/historicalChainTvl/{name}")
-                return r or []
+                result = r or []
+                self._llama_chain_hist[chain_name] = result
+                return result
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 404:
                     continue
                 raise
             except Exception:
                 break
+        self._llama_chain_hist[chain_name] = []
         return []
 
     async def _llama_dex_vol_history(
