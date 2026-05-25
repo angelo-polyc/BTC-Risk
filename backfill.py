@@ -77,7 +77,7 @@ async def main() -> None:
 
         async def pull_with_timeout(t):
             try:
-                return await asyncio.wait_for(pull_history_single(t, sem, api), timeout=90)
+                return await asyncio.wait_for(pull_history_single(t, sem, api), timeout=30)
             except asyncio.TimeoutError:
                 print(f"[backfill] {t.symbol} timed out at 90s — skipping")
                 return t, {m: [] for m in ["price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol"]}
@@ -155,7 +155,7 @@ async def backfill_symbols(symbols: list[str]) -> None:
         sem = asyncio.Semaphore(8)
         async def pull_with_timeout_s(t):
             try:
-                return await asyncio.wait_for(pull_history_single(t, sem, api), timeout=90)
+                return await asyncio.wait_for(pull_history_single(t, sem, api), timeout=30)
             except Exception as e:
                 print(f"[backfill] {t.symbol} failed: {e}")
                 return t, {m: [] for m in ["price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol"]}

@@ -109,7 +109,7 @@ class SourceAPI:
 
     async def __aenter__(self) -> "SourceAPI":
         self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=10.0, read=20.0, write=10.0, pool=5.0),
+            timeout=httpx.Timeout(connect=5.0, read=8.0, write=5.0, pool=5.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
         return self
