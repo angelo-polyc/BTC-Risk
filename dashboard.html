@@ -2677,20 +2677,21 @@ function renderDivHistoryCanvas(metric) {
   const W = wrap.clientWidth  || 960;
   const H = wrap.clientHeight || Math.round(window.innerHeight * 0.76);
 
-  const TOP_M    = 24;   // header row height
-  const CELL_H   = (H - TOP_M) / n;
-  const LABEL_W  = CELL_H >= 8 ? 58 : 0;  // hide labels if cells too short
-  const CELL_W   = (W - LABEL_W) / dates.length;
+  const TOP_M   = 24;
+  const CELL_H  = 18;          // fixed readable row height, scrolls vertically
+  const LABEL_W = 58;
+  const CELL_W  = (W - LABEL_W) / dates.length;  // fills full width
+  const canvasH = TOP_M + n * CELL_H;
 
   canvas.style.width  = W + "px";
-  canvas.style.height = H + "px";
+  canvas.style.height = canvasH + "px";
   canvas.width  = Math.round(W * dpr);
-  canvas.height = Math.round(H * dpr);
+  canvas.height = Math.round(canvasH * dpr);
 
   const ctx = canvas.getContext("2d");
   ctx.scale(dpr, dpr);
   ctx.fillStyle = "white";
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(0, 0, W, canvasH);
 
   // Build lookup: token_id → {date → z}
   const lookup = {};
@@ -2780,7 +2781,7 @@ function setupDivViewToggle() {
       } else {
         curCanvas.style.display = "none"; hisCanvas.style.display = "";
         select.style.display = "";
-        wrap.style.overflow = "hidden";
+        wrap.style.overflow = "auto";
         loadZscoreHistory();
       }
     });
