@@ -2567,7 +2567,33 @@ function renderDivCanvas(universe) {
 }
 
 function setupDivHover() {
-  const canvas = document.getElementById("div-heatmap-canvas");
+  const canvas  = document.getElementById("div-heatmap-canvas");
+  const hisCvs  = document.getElementById("div-history-canvas");
+  const tooltip = document.getElementById("div-tooltip");
+
+  // History canvas — tooltip showing token + date + value
+  hisCvs.addEventListener("mousemove", e => {
+    const layout = hisCvs._hlayout;
+    if (!layout || !_divUniverse) { tooltip.style.display = "none"; return; }
+    const rect = hisCvs.getBoundingClientRect();
+    const ri = Math.floor((e.clientY - rect.top  - layout.TOP_M)  / layout.CELL_H);
+    const ci = Math.floor((e.clientX - rect.left - layout.LABEL_W) / layout.CELL_W);
+    if (ri < 0 || ri >= _divUniverse.length || ci < 0 || ci >= layout.dates.length) {
+      tooltip.style.display = "none"; return;
+    }
+    const token  = _divUniverse[ri];
+    const date   = layout.dates[ci];
+    const metric = document.getElementById("div-metric-select").value;
+    const val    = (layout.lookup[token.id] || {})[date];
+    const valStr = (val !== undefined && val !== null)
+      ? (val >= 0 ? "+" : "") + val.toFixed(2) + "σ" : "—";
+    const label  = DIV_Z_LABELS[DIV_Z_COLS.indexOf(metric)].replace("\n", " ");
+    tooltip.textContent = token.symbol + "  ·  " + date + "\n" + label + "  " + valStr;
+    tooltip.style.display = "block";
+    tooltip.style.left = (e.clientX + 14) + "px";
+    tooltip.style.top  = (e.clientY  -  8) + "px";
+  });
+  hisCvs.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
 
   canvas.addEventListener("mousemove", e => {
     if (!_divUniverse) return;
@@ -2635,25 +2661,26 @@ function renderDivHistoryCanvas(metric) {
   if (!_divUniverse || !_divZscoreHistory) return;
 
   const canvas = document.getElementById("div-history-canvas");
+  const wrap   = document.getElementById("div-heatmap-wrap");
   const dpr    = window.devicePixelRatio || 1;
 
-  // Collect all dates present across tokens for this metric, last 90
+  // All dates for this metric across all tokens, last 90
   const dateSet = new Set();
-  for (const tokenEntry of Object.values(_divZscoreHistory.series || {})) {
-    for (const pt of (tokenEntry[metric] || [])) dateSet.add(pt.d);
-  }
+  for (const entry of Object.values(_divZscoreHistory.series || {}))
+    for (const pt of (entry[metric] || [])) dateSet.add(pt.d);
   const dates = [...dateSet].sort().slice(-90);
-  if (!dates.length) {
-    canvas.style.display = "none"; return;
-  }
+  if (!dates.length) { canvas.style.display = "none"; return; }
 
-  const CELL_H = DIV_CELL_H;
-  const CELL_W = Math.max(7, Math.min(14, Math.floor(900 / dates.length)));
-  const LEFT_M = DIV_LEFT_M;
-  const TOP_M  = 36;
-  const n      = _divUniverse.length;
-  const W      = LEFT_M + dates.length * CELL_W;
-  const H      = TOP_M  + n * CELL_H;
+  const n = _divUniverse.length;
+
+  // Fill the container exactly — measure after it's visible
+  const W = wrap.clientWidth  || 960;
+  const H = wrap.clientHeight || Math.round(window.innerHeight * 0.76);
+
+  const TOP_M    = 24;   // header row height
+  const CELL_H   = (H - TOP_M) / n;
+  const LABEL_W  = CELL_H >= 8 ? 58 : 0;  // hide labels if cells too short
+  const CELL_W   = (W - LABEL_W) / dates.length;
 
   canvas.style.width  = W + "px";
   canvas.style.height = H + "px";
@@ -2665,15 +2692,6 @@ function renderDivHistoryCanvas(metric) {
   ctx.fillStyle = "white";
   ctx.fillRect(0, 0, W, H);
 
-  // Date headers — show every Nth to avoid crowding
-  const step = Math.ceil(dates.length / 15);
-  ctx.font = "500 8px 'JetBrains Mono', monospace";
-  ctx.fillStyle = "#000";
-  ctx.textAlign = "center";
-  dates.forEach((d, ci) => {
-    if (ci % step === 0) ctx.fillText(d.slice(5), LEFT_M + ci * CELL_W + CELL_W / 2, 12);
-  });
-
   // Build lookup: token_id → {date → z}
   const lookup = {};
   for (const [tid, entry] of Object.entries(_divZscoreHistory.series || {})) {
@@ -2681,26 +2699,48 @@ function renderDivHistoryCanvas(metric) {
     for (const pt of (entry[metric] || [])) lookup[tid][pt.d] = pt.v;
   }
 
+  // Date headers — show every Nth label to avoid crowding
+  const labelStep = Math.max(1, Math.ceil(40 / CELL_W));
+  ctx.font = "500 8.5px 'JetBrains Mono', monospace";
+  ctx.fillStyle = "#000";
+  ctx.textAlign = "center";
+  dates.forEach((d, ci) => {
+    if (ci % labelStep === 0)
+      ctx.fillText(d.slice(5), LABEL_W + ci * CELL_W + CELL_W / 2, 14);
+  });
+
+  // Token rows
+  const cellGapW = CELL_W  > 2 ? 1 : 0;
+  const cellGapH = CELL_H  > 3 ? 1 : 0;
   _divUniverse.forEach((token, ri) => {
     const y = TOP_M + ri * CELL_H;
+
+    if (LABEL_W > 0) {
+      ctx.font      = "600 8px 'JetBrains Mono', monospace";
+      ctx.fillStyle = "#000";
+      ctx.textAlign = "right";
+      ctx.fillText(token.symbol, LABEL_W - 3, y + CELL_H * 0.75);
+    }
+
     const byDate = lookup[token.id] || {};
-
-    ctx.font = "600 9px 'JetBrains Mono', monospace";
-    ctx.fillStyle = "#000";
-    ctx.textAlign = "right";
-    ctx.fillText(token.symbol, LEFT_M - 5, y + CELL_H * 0.7);
-
     dates.forEach((d, ci) => {
       const z = byDate[d] !== undefined ? byDate[d] : null;
       ctx.fillStyle = divZColor(z);
-      ctx.fillRect(LEFT_M + ci * CELL_W, y, CELL_W - 1, CELL_H - 1);
+      ctx.fillRect(
+        LABEL_W + ci * CELL_W, y,
+        Math.max(1, CELL_W - cellGapW),
+        Math.max(1, CELL_H - cellGapH)
+      );
     });
 
-    if ((ri + 1) % 10 === 0) {
-      ctx.fillStyle = "rgba(0,0,0,0.1)";
-      ctx.fillRect(LEFT_M, y + CELL_H - 1, dates.length * CELL_W, 1);
+    if ((ri + 1) % 10 === 0 && CELL_H >= 3) {
+      ctx.fillStyle = "rgba(0,0,0,0.15)";
+      ctx.fillRect(LABEL_W, y + CELL_H - cellGapH, dates.length * CELL_W, 1);
     }
   });
+
+  // Store layout for hover tooltip
+  canvas._hlayout = { LABEL_W, TOP_M, CELL_W, CELL_H, dates, lookup };
 }
 
 async function loadZscoreHistory() {
@@ -2724,6 +2764,7 @@ function setupDivViewToggle() {
   const select    = document.getElementById("div-metric-select");
   const curCanvas = document.getElementById("div-heatmap-canvas");
   const hisCanvas = document.getElementById("div-history-canvas");
+  const wrap      = document.getElementById("div-heatmap-wrap");
 
   toggle.querySelectorAll("button").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -2733,11 +2774,13 @@ function setupDivViewToggle() {
       if (_divView === "current") {
         curCanvas.style.display = ""; hisCanvas.style.display = "none";
         select.style.display = "none";
+        wrap.style.overflow = "auto";
         document.getElementById("div-meta").textContent =
           (_divUniverse ? _divUniverse.length + " tokens · sorted by market cap" : "—");
       } else {
         curCanvas.style.display = "none"; hisCanvas.style.display = "";
         select.style.display = "";
+        wrap.style.overflow = "hidden";
         loadZscoreHistory();
       }
     });
