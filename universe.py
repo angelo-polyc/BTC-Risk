@@ -50,6 +50,9 @@ WRAPPED_IDS: set[str] = {
 
 # Manually curated exclusions: low-signal, illiquid, or out-of-scope tokens.
 PRESET_EXCLUDED_IDS: set[str] = {
+    # No spot volume — excluded for data quality
+    "nxm",                                          # NXM
+    "creator-chain",                                # CRTR
     # Tokenized funds / RWA
     "superstate-short-duration-us-government-securities-fund-ustb",  # USTB
     "eutbl",                                        # EUTBL
