@@ -21,19 +21,10 @@ async def pull_history_single(t, sem: asyncio.Semaphore, api) -> tuple:
         except Exception as e:
             print(f"[backfill] {t.symbol} price_history failed: {e}")
 
-        if t.has_coinglass:
-            try:
-                for d, oi, fapr, pvol, liqr in await api.derivs_history_30d(t.symbol):
-                    if oi is not None:
-                        metrics["oi"].append({"d": d.isoformat(), "v": oi})
-                    if fapr is not None:
-                        metrics["funding_apr"].append({"d": d.isoformat(), "v": fapr})
-                    if pvol is not None:
-                        metrics["perp_vol"].append({"d": d.isoformat(), "v": pvol})
-                    if liqr is not None:
-                        metrics["liq_oi_ratio"].append({"d": d.isoformat(), "v": liqr})
-            except Exception as e:
-                print(f"[backfill] {t.symbol} derivs_history failed: {e}")
+        # Derivs (oi/funding/perp_vol/liq) deliberately excluded from backfill.
+        # 289 tokens x 4 Coinglass history calls = 1156 requests — hits rate limits.
+        # Coinglass rate-limits by black-holing sockets (no 429, just silence).
+        # Daily ingest handles derivs at sustainable rate (1 call/token/day).
 
         if t.defillama_slug or t.chain_name:
             try:
@@ -73,27 +64,8 @@ async def main() -> None:
         )
         print(f"[backfill] universe: {len(universe)} tokens")
 
-        sem = asyncio.Semaphore(8)
-
-        async def pull_with_timeout(t):
-            try:
-                return await asyncio.wait_for(pull_history_single(t, sem, api), timeout=30)
-            except asyncio.TimeoutError:
-                print(f"[backfill] {t.symbol} timed out at 90s — skipping")
-                return t, {m: [] for m in ["price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol"]}
-            except Exception as e:
-                print(f"[backfill] {t.symbol} unexpected error: {e} — skipping")
-                return t, {m: [] for m in ["price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol"]}
-
-        tasks = [asyncio.create_task(pull_with_timeout(t)) for t in universe]
-        results = []
-        done_count = 0
-        for fut in asyncio.as_completed(tasks):
-            result = await fut
-            results.append(result)
-            done_count += 1
-            if done_count % 20 == 0:
-                print(f"[backfill] progress: {done_count}/{len(universe)}")
+        sem = asyncio.Semaphore(20)
+        results = await asyncio.gather(*(pull_history_single(t, sem, api) for t in universe))
 
     # Merge logic: backfill wins if it fetched ≥5 data points for a metric.
     # If backfill got <5 pts (endpoint had no coverage) but existing data has ≥5,
@@ -152,14 +124,8 @@ async def backfill_symbols(symbols: list[str]) -> None:
             return
         print(f"[backfill] selective: {[t.symbol for t in targets]}")
 
-        sem = asyncio.Semaphore(8)
-        async def pull_with_timeout_s(t):
-            try:
-                return await asyncio.wait_for(pull_history_single(t, sem, api), timeout=30)
-            except Exception as e:
-                print(f"[backfill] {t.symbol} failed: {e}")
-                return t, {m: [] for m in ["price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol"]}
-        results = await asyncio.gather(*(pull_with_timeout_s(t) for t in targets))
+        sem = asyncio.Semaphore(20)
+        results = await asyncio.gather(*(pull_history_single(t, sem, api) for t in targets))
 
     DERIVS = {"oi", "funding_apr", "perp_vol", "liq_oi_ratio"}
     updated = 0
