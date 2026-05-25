@@ -77,18 +77,20 @@ async def main() -> None:
 
         results = await asyncio.gather(*(pull_history_single(t, sem, api) for t in universe))
 
-    # Backfill owns: price, spot_vol, tvl, dex_vol (reliable 30d history endpoints).
-    # Daily ingest owns: oi, funding_apr, perp_vol, liq_oi_ratio (237-token coverage).
-    # Always restore derivs from existing data so backfill never overwrites them.
-    INGEST_OWNED = {"oi", "funding_apr", "perp_vol", "liq_oi_ratio"}
+    # Merge logic: backfill wins if it fetched ≥5 data points for a metric.
+    # If backfill got <5 pts (endpoint had no coverage) but existing data has ≥5,
+    # keep existing to preserve ingest-accumulated history.
+    DERIVS = {"oi", "funding_apr", "perp_vol", "liq_oi_ratio"}
 
     out_universe = []
     for t, metrics in results:
         existing = existing_by_id.get(t.id, {})
         existing_metrics = existing.get("metrics", {})
         final_metrics = dict(metrics)
-        for m in INGEST_OWNED:
-            if existing_metrics.get(m):
+        for m in DERIVS:
+            bf_pts = len(final_metrics.get(m) or [])
+            ex_pts = len(existing_metrics.get(m) or [])
+            if bf_pts < 5 and ex_pts >= 5:
                 final_metrics[m] = existing_metrics[m]
         out_universe.append({
             "id": t.id,
@@ -135,14 +137,16 @@ async def backfill_symbols(symbols: list[str]) -> None:
         sem = asyncio.Semaphore(20)
         results = await asyncio.gather(*(pull_history_single(t, sem, api) for t in targets))
 
-    INGEST_OWNED = {"oi", "funding_apr", "perp_vol", "liq_oi_ratio"}
+    DERIVS = {"oi", "funding_apr", "perp_vol", "liq_oi_ratio"}
     updated = 0
     for t, metrics in results:
         existing = existing_by_id.get(t.id, {})
         existing_metrics = existing.get("metrics", {})
         final_metrics = dict(metrics)
-        for m in INGEST_OWNED:
-            if existing_metrics.get(m):
+        for m in DERIVS:
+            bf_pts = len(final_metrics.get(m) or [])
+            ex_pts = len(existing_metrics.get(m) or [])
+            if bf_pts < 5 and ex_pts >= 5:
                 final_metrics[m] = existing_metrics[m]
         existing_by_id[t.id] = {
             "id": t.id, "symbol": t.symbol, "rank": t.rank,
