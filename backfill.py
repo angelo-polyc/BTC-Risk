@@ -45,7 +45,8 @@ UNIVERSE_URL = (
     "?x_api_key=88554ffb2c8fb071f37cb6f6b3dced4d5ad8f57c8cbd37e4edad34a7e860edb1"
 )
 
-TOKEN_CONCURRENCY   = 12
+BATCH_SIZE          = 10   # tokens per batch — written atomically after each
+TOKEN_CONCURRENCY   = 10   # match batch size so one batch runs at a time
 COINGECKO_CONCURRENCY = 4
 COINGLASS_CONCURRENCY = 6
 LLAMA_CONCURRENCY   = 8
@@ -308,26 +309,36 @@ async def run_backfill(
                     coingecko_key=coingecko_key, coinglass_key=coinglass_key,
                 )
 
+        # Build running output from existing data; batch writes keep it current
+        out_by_id: dict[str, dict] = dict(existing_idx)
+        total_batches = (len(universe) + BATCH_SIZE - 1) // BATCH_SIZE
+
         t0 = time.monotonic()
-        results = await asyncio.gather(
-            *(worker(t) for t in universe), return_exceptions=True,
-        )
+        for batch_num, batch_start in enumerate(range(0, len(universe), BATCH_SIZE), 1):
+            batch = universe[batch_start: batch_start + BATCH_SIZE]
+            LOG.info("batch %d/%d (tokens %d-%d)", batch_num, total_batches,
+                     batch_start + 1, batch_start + len(batch))
+
+            batch_results = await asyncio.gather(
+                *(worker(t) for t in batch), return_exceptions=True,
+            )
+            for r in batch_results:
+                if isinstance(r, dict) and r.get("id"):
+                    out_by_id[r["id"]] = r
+
+            # Atomic write after every batch — crash only loses current batch
+            atomic_write({"as_of": date.today().isoformat(), "universe": list(out_by_id.values())})
+            LOG.info("batch %d/%d saved — %d tokens total", batch_num, total_batches, len(out_by_id))
+
         elapsed = time.monotonic() - t0
 
-    # Filter out any unexpected exceptions from gather
-    clean = [r for r in results if isinstance(r, dict)]
-    payload = {
-        "as_of": date.today().isoformat(),
-        "universe": clean,
-    }
-    atomic_write(payload)
+    payload = {"as_of": date.today().isoformat(), "universe": list(out_by_id.values())}
 
-    if True:  # direct update (asyncio single-threaded)
-        progress.state = "complete"
-        progress.finished_at = _now_iso()
-        write_progress_snapshot(progress.to_dict())
+    progress.state = "complete"
+    progress.finished_at = _now_iso()
+    write_progress_snapshot(progress.to_dict())
 
-    LOG.info("backfill done tokens=%d failed=%d elapsed=%.1fs", len(clean), progress.failed, elapsed)
+    LOG.info("backfill done tokens=%d failed=%d elapsed=%.1fs", len(out_by_id), progress.failed, elapsed)
     return payload
 
 
