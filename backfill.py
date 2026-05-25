@@ -46,19 +46,10 @@ async def main() -> None:
                 except Exception as e:
                     print(f"[backfill] {t.symbol} price_history failed: {e}")
 
-                if t.has_coinglass:
-                    try:
-                        for d, oi, fapr, pvol, liqr in await api.derivs_history_30d(t.symbol):
-                            if oi is not None:
-                                metrics["oi"].append({"d": d.isoformat(), "v": oi})
-                            if fapr is not None:
-                                metrics["funding_apr"].append({"d": d.isoformat(), "v": fapr})
-                            if pvol is not None:
-                                metrics["perp_vol"].append({"d": d.isoformat(), "v": pvol})
-                            if liqr is not None:
-                                metrics["liq_oi_ratio"].append({"d": d.isoformat(), "v": liqr})
-                    except Exception as e:
-                        print(f"[backfill] {t.symbol} derivs_history failed: {e}")
+                # Derivs (oi, funding_apr, perp_vol, liq_oi_ratio) are NOT seeded
+                # by backfill — Coinglass aggregated-history endpoints only cover
+                # ~75 tokens vs the 237+ the daily ingest reaches via coins-markets
+                # + pairs-markets fallback. Derivs history is built by daily ingest.
 
                 if t.defillama_slug or t.chain_name:
                     try:
@@ -77,24 +68,19 @@ async def main() -> None:
 
         results = await asyncio.gather(*(pull_history(t) for t in universe))
 
-    # Derivs metrics rely on Coinglass history endpoints with limited coverage.
-    # If backfill got <5 points but existing ingest data has >=5, keep existing.
-    DERIVS = {"oi", "funding_apr", "perp_vol", "liq_oi_ratio"}
+    # Backfill owns: price, spot_vol, tvl, dex_vol (reliable 30d history endpoints).
+    # Daily ingest owns: oi, funding_apr, perp_vol, liq_oi_ratio (237-token coverage).
+    # Always restore derivs from existing data so backfill never overwrites them.
+    INGEST_OWNED = {"oi", "funding_apr", "perp_vol", "liq_oi_ratio"}
 
     out_universe = []
     for t, metrics in results:
         existing = existing_by_id.get(t.id, {})
         existing_metrics = existing.get("metrics", {})
         final_metrics = dict(metrics)
-        preserved = []
-        for m in DERIVS:
-            backfill_pts = len(final_metrics.get(m) or [])
-            existing_pts = len(existing_metrics.get(m) or [])
-            if backfill_pts < 5 and existing_pts >= 5:
+        for m in INGEST_OWNED:
+            if existing_metrics.get(m):
                 final_metrics[m] = existing_metrics[m]
-                preserved.append(m)
-        if preserved:
-            print(f"[backfill] {t.symbol} preserved existing derivs: {preserved}")
         out_universe.append({
             "id": t.id,
             "symbol": t.symbol,
