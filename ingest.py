@@ -114,10 +114,12 @@ async def run_ingest() -> None:
                 "price": None, "spot_vol": None, "oi": None, "funding_apr": None,
                 "perp_vol": None, "liq_oi_ratio": None, "tvl": None, "dex_vol": None,
             }
+            mcap = None
             async with sem:
                 px, vol = await api.price_volume(t.id)
                 out["price"] = px
                 out["spot_vol"] = vol
+                mcap = api.market_cap_usd(t.id)
 
                 if t.has_coinglass:
                     derivs = await api.derivatives(t.symbol)
@@ -134,12 +136,12 @@ async def run_ingest() -> None:
                     out["tvl"] = tvl
                     out["dex_vol"] = dexv
 
-            return t, out
+            return t, out, mcap
 
         results = await asyncio.gather(*(pull(t) for t in universe))
 
     new_universe = []
-    for t, today_metrics in results:
+    for t, today_metrics, mcap in results:
         existing = existing_by_id.get(t.id, {"metrics": {m: [] for m in today_metrics}})
         merged = {
             metric: merge_metric_series(
@@ -147,16 +149,21 @@ async def run_ingest() -> None:
             )
             for metric, val in today_metrics.items()
         }
-        new_universe.append({
+        entry = {
             "id": t.id,
             "symbol": t.symbol,
             "rank": t.rank,
+            "market_cap_usd": mcap,
             "defillama_slug": t.defillama_slug,
             "chain_name": t.chain_name,
             "coinglass_coverage": t.has_coinglass,
             "metrics": merged,
             "zscores": compute_zscores(merged),
-        })
+        }
+        # Preserve existing market_cap_usd if today's pull missed it
+        if mcap is None and "market_cap_usd" in existing:
+            entry["market_cap_usd"] = existing["market_cap_usd"]
+        new_universe.append(entry)
 
     state = {"as_of": today.isoformat(), "universe": new_universe}
     write_atomic(state)

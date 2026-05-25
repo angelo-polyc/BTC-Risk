@@ -105,6 +105,7 @@ class SourceAPI:
         self._llama_chain_hist: dict[str, list] = {}    # chain_name → history (backfill cache)
         self._cglass_supported: set[str] = set()
         self._price_cache: dict[str, float] = {}
+        self._mcap_cache: dict[str, float] = {}
         self._tickers_sem = asyncio.Semaphore(3)
 
     async def __aenter__(self) -> "SourceAPI":
@@ -142,12 +143,19 @@ class SourceAPI:
             batch = token_ids[i:i + batch_size]
             try:
                 r = await self._cg_get("/simple/price",
-                                        params={"ids": ",".join(batch), "vs_currencies": "usd"})
+                                        params={"ids": ",".join(batch), "vs_currencies": "usd",
+                                                "include_market_cap": "true"})
                 for cg_id, data in r.items():
                     if "usd" in data:
                         self._price_cache[cg_id] = data["usd"]
+                    mc = data.get("usd_market_cap")
+                    if mc:
+                        self._mcap_cache[cg_id] = float(mc)
             except Exception as e:
                 print(f"[cg batch prices] batch {i}: {e}")
+
+    def market_cap_usd(self, token_id: str) -> float | None:
+        return self._mcap_cache.get(token_id)
 
     async def _fetch_coinglass_coins_markets(self) -> None:
         try:
