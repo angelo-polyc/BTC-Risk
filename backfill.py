@@ -10,6 +10,17 @@ from ingest import DATA_FILE, EXCLUDE_CATEGORIES, PRESET_TOKENS, compute_zscores
 
 
 async def main() -> None:
+    # Load existing data — backfill will preserve ingest-built derivs series
+    # where the history endpoints return sparse results
+    existing_by_id: dict = {}
+    if DATA_FILE.exists():
+        try:
+            old = json.loads(DATA_FILE.read_text())
+            existing_by_id = {t["id"]: t for t in old.get("universe", [])}
+            print(f"[backfill] loaded {len(existing_by_id)} existing tokens to merge")
+        except Exception as e:
+            print(f"[backfill] could not load existing data: {e}")
+
     async with SourceAPI() as api:
         await api.prep_run()
 
@@ -66,8 +77,24 @@ async def main() -> None:
 
         results = await asyncio.gather(*(pull_history(t) for t in universe))
 
+    # Derivs metrics rely on Coinglass history endpoints with limited coverage.
+    # If backfill got <5 points but existing ingest data has >=5, keep existing.
+    DERIVS = {"oi", "funding_apr", "perp_vol", "liq_oi_ratio"}
+
     out_universe = []
     for t, metrics in results:
+        existing = existing_by_id.get(t.id, {})
+        existing_metrics = existing.get("metrics", {})
+        final_metrics = dict(metrics)
+        preserved = []
+        for m in DERIVS:
+            backfill_pts = len(final_metrics.get(m) or [])
+            existing_pts = len(existing_metrics.get(m) or [])
+            if backfill_pts < 5 and existing_pts >= 5:
+                final_metrics[m] = existing_metrics[m]
+                preserved.append(m)
+        if preserved:
+            print(f"[backfill] {t.symbol} preserved existing derivs: {preserved}")
         out_universe.append({
             "id": t.id,
             "symbol": t.symbol,
@@ -75,8 +102,8 @@ async def main() -> None:
             "defillama_slug": t.defillama_slug,
             "chain_name": t.chain_name,
             "coinglass_coverage": t.has_coinglass,
-            "metrics": metrics,
-            "zscores": compute_zscores(metrics),
+            "metrics": final_metrics,
+            "zscores": compute_zscores(final_metrics),
         })
 
     state = {"as_of": date.today().isoformat(), "universe": out_universe}

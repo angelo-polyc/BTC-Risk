@@ -529,14 +529,21 @@ class SourceAPI:
         return rows
 
     async def _cglass_funding_history(self, symbol: str, start_ms: int, end_ms: int):
-        r = await self._cglass_get("/api/futures/funding-rate/oi-weight-history",
-                                    params={"exchange": "Binance", "symbol": symbol,
-                                            "interval": "1d", "limit": 35})
-        rows = r.get("data", [])
-        for row in rows:
-            if "close" in row and row["close"] is not None:
-                row["close"] = float(row["close"])
-        return rows
+        """OI-weighted funding history. Tries major exchanges in order until data found."""
+        for exchange in ("Binance", "OKX", "Bybit", "Hyperliquid"):
+            try:
+                r = await self._cglass_get("/api/futures/funding-rate/oi-weight-history",
+                                            params={"exchange": exchange, "symbol": symbol,
+                                                    "interval": "1d", "limit": 35})
+                rows = r.get("data", [])
+                if rows:
+                    for row in rows:
+                        if "close" in row and row["close"] is not None:
+                            row["close"] = float(row["close"])
+                    return rows
+            except Exception:
+                continue
+        return []
 
     async def _cglass_volume_history(self, symbol: str, start_ms: int, end_ms: int):
         r = await self._cglass_get("/api/futures_spot_volume_ratio",
