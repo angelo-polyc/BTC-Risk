@@ -239,7 +239,7 @@ PINNED_IDS: set[str] = {
     "nexpace",                  # NXPC
     "nym",                      # NYM
     "autonolas",                # OLAS
-    "mantra-dao",               # OM
+    "mantra",                   # OM
     "omni-network",             # OMNI
     "opengradient",             # OPG
     "orca",                     # ORCA
@@ -445,7 +445,7 @@ SLUG_OVERRIDES: dict[str, str] = {
     "usual":                        "usual",
     "drift-protocol":               "drift",
     "ssv-network":                  "ssv-network",
-    "mantra-dao":                   "mantra",
+    "mantra":                       "mantra",
     "cetus-protocol":               "cetus",
     "autonolas":                    "autonolas",
     "across-protocol":              "across",
