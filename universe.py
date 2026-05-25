@@ -184,7 +184,7 @@ PINNED_IDS: set[str] = {
     "bluefin",                  # BLUE
     "blur",                     # BLUR
     "collector-crypt",          # CARDS
-    "ceto",                     # CELO (via chain map)
+    "celo",                     # CELO (via chain map)
     "cetus-protocol",           # CETUS
     "chip-2",                   # CHIP
     "tokenbot-2",               # CLANKER
@@ -205,7 +205,7 @@ PINNED_IDS: set[str] = {
     "goldfinch",                # GFI
     "gmx",                      # GMX
     "goatseus-maximus",         # GOAT
-    "honey-3",                  # HONEY
+
     "illuvium",                 # ILV
     "initia",                   # INIT
     "infinex-2",                # INX
@@ -286,7 +286,7 @@ PINNED_IDS: set[str] = {
     "anoma",                    # XAN
     "yearn-finance",            # YFI
     "yield-guild-games",        # YGG
-    "ynesnoerror",              # YNE
+
     "zerebro",                  # ZEREBRO
     "0x",                       # ZRX
     # Tokens with DefiLlama config but outside top-300 — must be pinned
