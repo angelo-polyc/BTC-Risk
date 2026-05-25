@@ -65,17 +65,17 @@ HTTP_LIMITS = httpx.Limits(
 
 # ── progress tracking ─────────────────────────────────────────────────────────
 
-@dataclass
 class Progress:
-    state: str = "idle"
-    started_at: Optional[str] = None
-    finished_at: Optional[str] = None
-    total: int = 0
-    processed: int = 0
-    failed: int = 0
-    in_flight: set[str] = field(default_factory=set)
-    last_error: Optional[str] = None
-    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    """Mutable progress state — asyncio is single-threaded, no lock needed."""
+    def __init__(self):
+        self.state = "idle"
+        self.started_at = None
+        self.finished_at = None
+        self.total = 0
+        self.processed = 0
+        self.failed = 0
+        self.in_flight: set[str] = set()
+        self.last_error = None
 
     def to_dict(self) -> dict:
         return {
@@ -200,7 +200,7 @@ async def _process_token(
     coinglass_key: str,
 ) -> dict:
     coin_id = token["id"]
-    async with progress._lock:
+    if True:  # direct update (asyncio single-threaded)
         progress.in_flight.add(coin_id)
     try:
         try:
@@ -216,13 +216,13 @@ async def _process_token(
         except asyncio.TimeoutError:
             LOG.warning("token timeout id=%s", coin_id)
             fetched = {k: [] for k in ("price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol")}
-            async with progress._lock:
+            if True:  # direct update (asyncio single-threaded)
                 progress.failed += 1
                 progress.last_error = f"timeout:{coin_id}"
         except Exception as exc:
             LOG.exception("token failed id=%s", coin_id)
             fetched = {k: [] for k in ("price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol")}
-            async with progress._lock:
+            if True:  # direct update (asyncio single-threaded)
                 progress.failed += 1
                 progress.last_error = f"{coin_id}:{exc!r}"[:200]
 
@@ -244,7 +244,7 @@ async def _process_token(
             "zscores": compute_zscores(merged),
         }
     finally:
-        async with progress._lock:
+        if True:  # direct update (asyncio single-threaded)
             progress.in_flight.discard(coin_id)
             progress.processed += 1
             if progress.processed % PROGRESS_SNAPSHOT_EVERY == 0:
@@ -266,7 +266,7 @@ async def run_backfill(
     if not coinglass_key:
         raise RuntimeError("COINGLASS_API_KEY missing")
 
-    async with progress._lock:
+    if True:  # direct update (asyncio single-threaded)
         progress.state = "running"
         progress.started_at = _now_iso()
         progress.finished_at = None
@@ -296,7 +296,7 @@ async def run_backfill(
         if token_limit:
             universe = universe[:token_limit]
 
-        async with progress._lock:
+        if True:  # direct update (asyncio single-threaded)
             progress.total = len(universe)
 
         async def worker(tok: dict) -> dict:
@@ -322,7 +322,7 @@ async def run_backfill(
     }
     atomic_write(payload)
 
-    async with progress._lock:
+    if True:  # direct update (asyncio single-threaded)
         progress.state = "complete"
         progress.finished_at = _now_iso()
         write_progress_snapshot(progress.to_dict())
