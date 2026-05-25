@@ -863,16 +863,32 @@
 
 <section>
   <div class="section-head">
-    <h2>Full Universe — 30d Rolling Z-Scores</h2>
+    <h2>Full Universe — Z-Scores</h2>
     <div class="section-head-right">
-      <div class="meta">sorted by market cap · green = negative z · red = positive z · grey = no data</div>
-      <div class="actions">
+      <div class="meta" style="margin-right:12px">sorted by market cap · green = negative z · red = positive z · grey = no data</div>
+      <div class="toggle" id="div-view-toggle">
+        <button data-view="current" class="active">Current</button>
+        <button data-view="history">History</button>
+      </div>
+      <select id="div-metric-select" style="display:none;font-family:inherit;font-size:10.5px;padding:2px 6px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);margin-left:8px">
+        <option value="price_z">Price level</option>
+        <option value="price_dz">Price 24h Δ</option>
+        <option value="spot_vol_dz">Spot vol</option>
+        <option value="oi_dz">OI</option>
+        <option value="funding_z" selected>Funding</option>
+        <option value="perp_vol_dz">Perp vol</option>
+        <option value="liq_ratio_z">Liq ratio</option>
+        <option value="tvl_dz">TVL</option>
+        <option value="dex_vol_dz">DEX vol</option>
+      </select>
+      <div class="actions" style="margin-left:8px">
         <button id="btn-div-refresh" type="button">↻ REFRESH</button>
       </div>
     </div>
   </div>
   <div id="div-heatmap-wrap">
     <canvas id="div-heatmap-canvas"></canvas>
+    <canvas id="div-history-canvas" style="display:none"></canvas>
   </div>
 </section>
 
@@ -898,7 +914,8 @@
 const API_TOKEN = "{{BTC_API_TOKEN}}";
 const API_BASE  = "";   /* same-origin; /dashboard is served by the API */
 
-const DIVERGENCE_URL = "https://dud.up.railway.app/divergence.json?x_api_key=88554ffb2c8fb071f37cb6f6b3dced4d5ad8f57c8cbd37e4edad34a7e860edb1";
+const DIVERGENCE_URL     = "https://dud.up.railway.app/divergence.json?x_api_key=88554ffb2c8fb071f37cb6f6b3dced4d5ad8f57c8cbd37e4edad34a7e860edb1";
+const ZSCORE_HISTORY_URL = "https://dud.up.railway.app/zscore_history?x_api_key=88554ffb2c8fb071f37cb6f6b3dced4d5ad8f57c8cbd37e4edad34a7e860edb1";
 const FETCH_TIMEOUT_MS = 20000;
 
 const HYPS = [
@@ -2609,6 +2626,131 @@ async function loadDivergence(force = false) {
   }
 }
 
+/* ── Divergence history view ──────────────────────────────── */
+
+let _divZscoreHistory = null;
+let _divView = "current";  // "current" | "history"
+
+function renderDivHistoryCanvas(metric) {
+  if (!_divUniverse || !_divZscoreHistory) return;
+
+  const canvas = document.getElementById("div-history-canvas");
+  const dpr    = window.devicePixelRatio || 1;
+
+  // Collect all dates present across tokens for this metric, last 90
+  const dateSet = new Set();
+  for (const tokenEntry of Object.values(_divZscoreHistory.series || {})) {
+    for (const pt of (tokenEntry[metric] || [])) dateSet.add(pt.d);
+  }
+  const dates = [...dateSet].sort().slice(-90);
+  if (!dates.length) {
+    canvas.style.display = "none"; return;
+  }
+
+  const CELL_H = DIV_CELL_H;
+  const CELL_W = Math.max(7, Math.min(14, Math.floor(900 / dates.length)));
+  const LEFT_M = DIV_LEFT_M;
+  const TOP_M  = 36;
+  const n      = _divUniverse.length;
+  const W      = LEFT_M + dates.length * CELL_W;
+  const H      = TOP_M  + n * CELL_H;
+
+  canvas.style.width  = W + "px";
+  canvas.style.height = H + "px";
+  canvas.width  = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, W, H);
+
+  // Date headers — show every Nth to avoid crowding
+  const step = Math.ceil(dates.length / 15);
+  ctx.font = "500 8px 'JetBrains Mono', monospace";
+  ctx.fillStyle = "#000";
+  ctx.textAlign = "center";
+  dates.forEach((d, ci) => {
+    if (ci % step === 0) ctx.fillText(d.slice(5), LEFT_M + ci * CELL_W + CELL_W / 2, 12);
+  });
+
+  // Build lookup: token_id → {date → z}
+  const lookup = {};
+  for (const [tid, entry] of Object.entries(_divZscoreHistory.series || {})) {
+    lookup[tid] = {};
+    for (const pt of (entry[metric] || [])) lookup[tid][pt.d] = pt.v;
+  }
+
+  _divUniverse.forEach((token, ri) => {
+    const y = TOP_M + ri * CELL_H;
+    const byDate = lookup[token.id] || {};
+
+    ctx.font = "600 9px 'JetBrains Mono', monospace";
+    ctx.fillStyle = "#000";
+    ctx.textAlign = "right";
+    ctx.fillText(token.symbol, LEFT_M - 5, y + CELL_H * 0.7);
+
+    dates.forEach((d, ci) => {
+      const z = byDate[d] !== undefined ? byDate[d] : null;
+      ctx.fillStyle = divZColor(z);
+      ctx.fillRect(LEFT_M + ci * CELL_W, y, CELL_W - 1, CELL_H - 1);
+    });
+
+    if ((ri + 1) % 10 === 0) {
+      ctx.fillStyle = "rgba(0,0,0,0.1)";
+      ctx.fillRect(LEFT_M, y + CELL_H - 1, dates.length * CELL_W, 1);
+    }
+  });
+}
+
+async function loadZscoreHistory() {
+  const meta = document.getElementById("div-meta");
+  if (_divZscoreHistory) { renderDivHistoryCanvas(document.getElementById("div-metric-select").value); return; }
+  meta.textContent = "loading history…";
+  try {
+    const r = await fetch(ZSCORE_HISTORY_URL);
+    if (!r.ok) throw new Error("http " + r.status + " — history may not be seeded yet");
+    _divZscoreHistory = await r.json();
+    renderDivHistoryCanvas(document.getElementById("div-metric-select").value);
+    meta.textContent = "history loaded · " + (_divZscoreHistory.as_of || "—");
+  } catch(e) {
+    meta.textContent = "history load failed: " + e.message;
+    console.error("[zscore history]", e);
+  }
+}
+
+function setupDivViewToggle() {
+  const toggle    = document.getElementById("div-view-toggle");
+  const select    = document.getElementById("div-metric-select");
+  const curCanvas = document.getElementById("div-heatmap-canvas");
+  const hisCanvas = document.getElementById("div-history-canvas");
+
+  toggle.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      toggle.querySelectorAll("button").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      _divView = btn.dataset.view;
+      if (_divView === "current") {
+        curCanvas.style.display = ""; hisCanvas.style.display = "none";
+        select.style.display = "none";
+        document.getElementById("div-meta").textContent =
+          (_divUniverse ? _divUniverse.length + " tokens · sorted by market cap" : "—");
+      } else {
+        curCanvas.style.display = "none"; hisCanvas.style.display = "";
+        select.style.display = "";
+        loadZscoreHistory();
+      }
+    });
+  });
+
+  select.addEventListener("change", () => {
+    if (_divView === "history") {
+      _divZscoreHistory = null;  // force re-render with new metric
+      loadZscoreHistory();
+    }
+  });
+}
+
 function setupTabs() {
   const btnModel = document.getElementById("tab-btn-model");
   const btnDiv   = document.getElementById("tab-btn-divergence");
@@ -2655,6 +2797,7 @@ async function refresh() {
 
 function init() {
   setupTabs();
+  setupDivViewToggle();
   document.getElementById("btn-refresh").addEventListener("click", refresh);
 
   const now = new Date();
