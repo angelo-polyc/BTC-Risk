@@ -27,7 +27,7 @@ async def pull_history_single(t, sem: asyncio.Semaphore, api) -> tuple:
                 metrics["price"].append({"d": d.isoformat(), "v": px})
                 metrics["spot_vol"].append({"d": d.isoformat(), "v": vol})
         except Exception as e:
-            print(f"[backfill] {t.symbol} price_history failed: {e}")
+            _log(f"[backfill] {t.symbol} price_history failed: {e}")
 
         if t.has_coinglass:
             try:
@@ -41,7 +41,7 @@ async def pull_history_single(t, sem: asyncio.Semaphore, api) -> tuple:
                     if liqr is not None:
                         metrics["liq_oi_ratio"].append({"d": d.isoformat(), "v": liqr})
             except Exception as e:
-                print(f"[backfill] {t.symbol} derivs_history failed: {e}")
+                _log(f"[backfill] {t.symbol} derivs_history failed: {e}")
 
         if t.defillama_slug or t.chain_name:
             try:
@@ -51,11 +51,26 @@ async def pull_history_single(t, sem: asyncio.Semaphore, api) -> tuple:
                     if dexv is not None:
                         metrics["dex_vol"].append({"d": d.isoformat(), "v": dexv})
             except Exception as e:
-                print(f"[backfill] {t.symbol} protocol_history failed: {e}")
+                _log(f"[backfill] {t.symbol} protocol_history failed: {e}")
 
-    print(f"[backfill] {t.symbol} — price={len(metrics['price'])} oi={len(metrics['oi'])} "
+    _log(f"[backfill] {t.symbol} — price={len(metrics['price'])} oi={len(metrics['oi'])} "
           f"tvl={len(metrics['tvl'])} dex_vol={len(metrics['dex_vol'])}")
     return t, metrics
+
+
+LOG_FILE = DATA_FILE.parent / "backfill.log"
+
+
+def _log(msg: str) -> None:
+    from datetime import datetime
+    line = f"{datetime.utcnow().isoformat()} {msg}\n"
+    print(line.strip())
+    try:
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(LOG_FILE, "a") as f:
+            f.write(line)
+    except Exception:
+        pass
 
 
 async def main() -> None:
@@ -66,14 +81,14 @@ async def main() -> None:
         try:
             old = json.loads(DATA_FILE.read_text())
             existing_by_id = {t["id"]: t for t in old.get("universe", [])}
-            print(f"[backfill] loaded {len(existing_by_id)} existing tokens to merge")
+            _log(f"[backfill] loaded {len(existing_by_id)} existing tokens to merge")
         except Exception as e:
-            print(f"[backfill] could not load existing data: {e}")
+            _log(f"[backfill] could not load existing data: {e}")
 
-    print("[backfill] starting prep_run")
+    _log("[backfill] starting prep_run")
     async with SourceAPI() as api:
         await api.prep_run()
-        print("[backfill] prep_run done")
+        _log("[backfill] prep_run done")
 
         try:
             universe = await resolve_universe(
@@ -83,9 +98,9 @@ async def main() -> None:
                 api=api,
             )
         except Exception as e:
-            print(f"[backfill] resolve_universe FAILED: {type(e).__name__}: {e}")
+            _log(f"[backfill] resolve_universe FAILED: {type(e).__name__}: {e}")
             return
-        print(f"[backfill] universe: {len(universe)} tokens")
+        _log(f"[backfill] universe: {len(universe)} tokens")
 
         # Sequential per-token with 1s pacing — avoids burst that triggers
         # Coinglass edge throttling (black-holes connections, not 429s).
@@ -115,13 +130,13 @@ async def main() -> None:
             try:
                 _, metrics = await pull_history_single(t, sem, api)
             except Exception as e:
-                print(f"[backfill] {t.symbol} failed: {e}")
+                _log(f"[backfill] {t.symbol} failed: {e}")
                 metrics = {m: [] for m in ["price","spot_vol","oi","funding_apr","perp_vol","liq_oi_ratio","tvl","dex_vol"]}
             _merge_and_append(t, metrics)
 
             # Checkpoint every 25 tokens so a crash doesn't lose all work
             if (i + 1) % 25 == 0:
-                print(f"[backfill] checkpoint {i+1}/{len(universe)}")
+                _log(f"[backfill] checkpoint {i+1}/{len(universe)}")
                 _checkpoint(out_universe)
 
             # 1s pace between tokens → ~4 req/sec sustained
@@ -134,14 +149,14 @@ async def main() -> None:
     if tmp.exists():
         tmp.replace(DATA_FILE)
     size_kb = DATA_FILE.stat().st_size // 1024
-    print(f"[backfill] complete — {len(out_universe)} tokens, ~{size_kb}KB → {DATA_FILE}")
+    _log(f"[backfill] complete — {len(out_universe)} tokens, ~{size_kb}KB → {DATA_FILE}")
 
 
 async def backfill_symbols(symbols: list[str]) -> None:
     """Backfill specific tokens by symbol (e.g. ['BTC', 'ETH']).
     Merges into existing data — only updates the matched tokens."""
     if not DATA_FILE.exists():
-        print(f"[backfill] no data file, run full backfill first")
+        _log(f"[backfill] no data file, run full backfill first")
         return
 
     syms = {s.upper() for s in symbols}
@@ -157,9 +172,9 @@ async def backfill_symbols(symbols: list[str]) -> None:
         )
         targets = [t for t in universe if t.symbol.upper() in syms]
         if not targets:
-            print(f"[backfill] no matching tokens found for {syms}")
+            _log(f"[backfill] no matching tokens found for {syms}")
             return
-        print(f"[backfill] selective: {[t.symbol for t in targets]}")
+        _log(f"[backfill] selective: {[t.symbol for t in targets]}")
 
         sem = asyncio.Semaphore(20)
         results = await asyncio.gather(*(pull_history_single(t, sem, api) for t in targets))
@@ -188,7 +203,7 @@ async def backfill_symbols(symbols: list[str]) -> None:
     tmp = DATA_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, separators=(",", ":")))
     tmp.replace(DATA_FILE)
-    print(f"[backfill] selective complete — updated {updated} tokens")
+    _log(f"[backfill] selective complete — updated {updated} tokens")
 
 
 if __name__ == "__main__":

@@ -36,6 +36,16 @@ app = FastAPI(lifespan=lifespan)
 async def healthz():
     return "ok"
 
+@app.get("/logs")
+async def get_logs(x_api_key: str | None = None):
+    """Read backfill log file."""
+    if API_KEY and x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    log_file = DATA_DIR / "backfill.log"
+    if not log_file.exists():
+        return PlainTextResponse("no log file yet")
+    return PlainTextResponse(log_file.read_text()[-5000:])  # last 5KB
+
 @app.get("/status")
 async def status(x_api_key: str | None = None):
     """Lightweight status — as_of + counts only, no data payload."""
