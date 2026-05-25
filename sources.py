@@ -1,4 +1,4 @@
-"""All Coinglass API calls. Nothing else talks to the outside world."""
+"""All external API calls — CoinGecko for prices, Coinglass for CVD/funding."""
 from __future__ import annotations
 
 import asyncio
@@ -10,6 +10,7 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 CGLASS_BASE = "https://open-api-v4.coinglass.com"
+CG_BASE     = "https://pro-api.coingecko.com/api/v3"
 
 _retry = retry(
     stop=stop_after_attempt(3),
@@ -33,10 +34,12 @@ class CVDBar(NamedTuple):
 class SourceAPI:
 
     def __init__(self, key: str | None = None, timeout: float = 20.0) -> None:
-        self._key = key or os.environ.get("COINGLASS_API_KEY", "")
+        self._key    = key or os.environ.get("COINGLASS_API_KEY", "")
+        self._cg_key = os.environ.get("COINGECKO_API_KEY", "")
         self._timeout = timeout
         self._client: httpx.AsyncClient | None = None
         self._supported: set[str] = set()
+        self._cg_id_map: dict[str, str] = {}   # symbol.upper() → coingecko id
 
     async def __aenter__(self) -> "SourceAPI":
         self._client = httpx.AsyncClient(
@@ -65,14 +68,44 @@ class SourceAPI:
         return r.json()
 
     async def warm_supported(self) -> None:
-        """Pre-fetch supported coins list. Call once per run."""
+        """Pre-fetch Coinglass supported coins + CoinGecko symbol→id map."""
+        await asyncio.gather(
+            self._warm_coinglass_supported(),
+            self._warm_cg_id_map(),
+        )
+
+    async def _warm_coinglass_supported(self) -> None:
         try:
             r = await self._get("/api/futures/supported-coins")
             self._supported = {s.upper() for s in r.get("data", [])}
-            print(f"[sources] supported coins: {len(self._supported)}")
+            print(f"[sources] coinglass supported: {len(self._supported)}")
         except Exception as e:
-            print(f"[sources] supported-coins failed: {e}")
+            print(f"[sources] coinglass supported-coins failed: {e}")
             self._supported = set()
+
+    async def _warm_cg_id_map(self) -> None:
+        """Build symbol → CoinGecko ID map from top-1000 by market cap."""
+        headers = {"x-cg-pro-api-key": self._cg_key} if self._cg_key else {}
+        mapping: dict[str, str] = {}
+        try:
+            for page in range(1, 5):   # 250 × 4 = top 1000
+                r = await self.client.get(
+                    f"{CG_BASE}/coins/markets",
+                    params={"vs_currency": "usd", "order": "market_cap_desc",
+                            "per_page": 250, "page": page},
+                    headers=headers,
+                )
+                r.raise_for_status()
+                for coin in r.json():
+                    sym = coin.get("symbol", "").upper()
+                    cid = coin.get("id", "")
+                    if sym and cid and sym not in mapping:
+                        mapping[sym] = cid
+            self._cg_id_map = mapping
+            print(f"[sources] coingecko id map: {len(mapping)} symbols")
+        except Exception as e:
+            print(f"[sources] coingecko id map failed: {e}")
+            self._cg_id_map = {}
 
     def supports(self, symbol: str) -> bool:
         return symbol.upper() in self._supported
@@ -82,16 +115,38 @@ class SourceAPI:
     # ------------------------------------------------------------------ #
 
     async def spot_history(self, symbol: str, limit: int = 220) -> list[DayBar]:
-        """Daily close prices. Tries spot first (Binance→Bybit→OKX), then perp as fallback."""
-        candidates = [
+        """Daily close prices. CoinGecko primary (broad coverage), Coinglass fallback."""
+        # -- CoinGecko (primary) --
+        cg_id = self._cg_id_map.get(symbol.upper())
+        if cg_id:
+            try:
+                headers = {"x-cg-pro-api-key": self._cg_key} if self._cg_key else {}
+                r = await self.client.get(
+                    f"{CG_BASE}/coins/{cg_id}/market_chart",
+                    params={"vs_currency": "usd", "days": str(limit), "interval": "daily"},
+                    headers=headers,
+                )
+                r.raise_for_status()
+                data = r.json()
+                prices = data.get("prices", [])
+                if len(prices) >= 10:
+                    out = []
+                    for ts_ms, px in prices:
+                        out.append(DayBar(
+                            date=datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date(),
+                            close=float(px),
+                        ))
+                    return sorted(out, key=lambda x: x.date)
+            except Exception as e:
+                print(f"[sources] cg price {symbol} ({cg_id}): {e}")
+
+        # -- Coinglass fallback (spot then perp) --
+        for path, exchange, pair in [
             ("/api/spot/price/history",    "Binance", f"{symbol}USDT"),
             ("/api/spot/price/history",    "Bybit",   f"{symbol}USDT"),
-            ("/api/spot/price/history",    "OKX",     f"{symbol}-USDT"),
             ("/api/futures/price/history", "Binance", f"{symbol}USDT"),
             ("/api/futures/price/history", "Bybit",   f"{symbol}USDT"),
-            ("/api/futures/price/history", "OKX",     f"{symbol}-USDT-SWAP"),
-        ]
-        for path, exchange, pair in candidates:
+        ]:
             try:
                 r = await self._get(path, {"exchange": exchange, "symbol": pair,
                                            "interval": "1d", "limit": limit})
@@ -112,7 +167,7 @@ class SourceAPI:
                 if out:
                     return sorted(out, key=lambda x: x.date)
             except Exception as e:
-                print(f"[sources] price {symbol} {exchange}: {e}")
+                print(f"[sources] cglass price {symbol} {exchange}: {e}")
         return []
 
     # ------------------------------------------------------------------ #
