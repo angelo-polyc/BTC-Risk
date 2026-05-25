@@ -32,7 +32,7 @@ async def fetch_coingecko(
     data = await request_json(
         client,
         f"{CG_BASE}/coins/{coin_id}/market_chart",
-        params={"vs_currency": "usd", "days": "30", "interval": "daily"},
+        params={"vs_currency": "usd", "days": "90", "interval": "daily"},
         headers={"x-cg-pro-api-key": api_key, "accept": "application/json"},
         sem=sem,
         bucket=bucket,
@@ -95,7 +95,7 @@ async def fetch_coinglass_oi(client, sem, symbol: str, api_key: str, bucket=None
     rows = await _coinglass_get(
         client, sem, api_key,
         "/api/futures/open-interest/aggregated-history",
-        {"symbol": symbol, "interval": "1d", "limit": 35, "unit": "usd"},
+        {"symbol": symbol, "interval": "1d", "limit": 95, "unit": "usd"},
         bucket=bucket,
     )
     if not rows:
@@ -115,7 +115,7 @@ async def fetch_coinglass_funding_apr(client, sem, symbol: str, api_key: str, bu
     rows = await _coinglass_get(
         client, sem, api_key,
         "/api/futures/funding-rate/oi-weight-history",
-        {"symbol": symbol, "interval": "1d", "limit": 35},
+        {"symbol": symbol, "interval": "1d", "limit": 95},
         bucket=bucket,
     )
     if not rows:
@@ -168,7 +168,7 @@ async def fetch_coinglass_liq_oi_ratio(
             "symbol": symbol,
             "interval": "1d",
             "exchange_list": COINGLASS_LIQ_EXCHANGES,
-            "limit": 35,
+            "limit": 95,
         },
         bucket=bucket,
     )

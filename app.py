@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from ingest import run_ingest
+from ingest import run_ingest, seed_zscore_history, ZSCORE_HISTORY_FILE
 from backfill import main as run_backfill, backfill_symbols, progress as backfill_progress
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
@@ -39,7 +39,7 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://btc-risk.up.railway.app"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -81,6 +81,26 @@ async def divergence(x_api_key: str | None = None):
     if not DATA_FILE.exists():
         raise HTTPException(status_code=503, detail="no data yet — run POST /ingest or wait for first cron")
     return JSONResponse(content=json.loads(DATA_FILE.read_text()))
+
+@app.get("/zscore_history")
+async def get_zscore_history(x_api_key: str | None = None):
+    """Rolling 90-day z-score history per token per metric."""
+    if API_KEY and x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if not ZSCORE_HISTORY_FILE.exists():
+        raise HTTPException(status_code=404, detail="no history yet — run POST /seed_zscore_history or wait for next ingest")
+    return JSONResponse(content=json.loads(ZSCORE_HISTORY_FILE.read_text()))
+
+
+@app.post("/seed_zscore_history")
+async def post_seed_zscore_history(x_api_key: str | None = None):
+    """One-time retroactive seed of zscore_history.json from existing raw data.
+    Run once after the 90-day backfill completes."""
+    if API_KEY and x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    result = await seed_zscore_history()
+    return JSONResponse(content=result)
+
 
 @app.post("/ingest")
 async def manual_ingest(x_api_key: str | None = None):

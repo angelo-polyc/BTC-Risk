@@ -9,8 +9,11 @@ from datetime import date, timedelta
 from sources import SourceAPI
 from universe import resolve_universe
 
-DATA_FILE = Path(os.environ.get("DATA_DIR", "/data")) / "divergence.json"
-RETENTION_DAYS = 30
+DATA_FILE          = Path(os.environ.get("DATA_DIR", "/data")) / "divergence.json"
+ZSCORE_HISTORY_FILE = Path(os.environ.get("DATA_DIR", "/data")) / "zscore_history.json"
+RETENTION_DAYS     = 90   # raw metric rolling window
+ZSCORE_WINDOW      = 30   # points used for z-score computation (unchanged)
+ZSCORE_HISTORY_RETENTION = 90
 
 EXCLUDE_CATEGORIES = {
     "Stablecoins", "Wrapped-Tokens", "Liquid-Staked-Tokens",
@@ -35,7 +38,10 @@ _MIN_POINTS = 5
 
 
 def _vals(series: list) -> list[float]:
-    return [r["v"] for r in sorted(series, key=lambda r: r["d"]) if r.get("v") is not None]
+    """Last ZSCORE_WINDOW non-null values sorted by date. Caps at 30 regardless of
+    how many raw points are stored so z-scores stay on a consistent 30-day baseline."""
+    all_vals = [r["v"] for r in sorted(series, key=lambda r: r["d"]) if r.get("v") is not None]
+    return all_vals[-ZSCORE_WINDOW:]
 
 
 def _level_z(values: list[float]) -> float | None:
@@ -76,6 +82,76 @@ def compute_zscores(metrics: dict) -> dict:
         "tvl_dz":       z("tvl",          "delta"),
         "dex_vol_dz":   z("dex_vol",      "delta"),
     }
+
+
+def _load_zscore_history() -> dict:
+    if ZSCORE_HISTORY_FILE.exists():
+        try:
+            return json.loads(ZSCORE_HISTORY_FILE.read_text())
+        except (OSError, ValueError):
+            pass
+    return {"as_of": None, "series": {}}
+
+
+def _write_zscore_history(state: dict) -> None:
+    tmp = ZSCORE_HISTORY_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, separators=(",", ":")))
+    tmp.replace(ZSCORE_HISTORY_FILE)
+
+
+def _append_zscore_history(token_id: str, symbol: str, today: date,
+                            zscores: dict, state: dict) -> None:
+    today_str = today.isoformat()
+    cutoff    = (today - timedelta(days=ZSCORE_HISTORY_RETENTION)).isoformat()
+    token_entry = state["series"].setdefault(token_id, {"symbol": symbol})
+    for metric, val in zscores.items():
+        if val is None:
+            continue
+        series = [pt for pt in token_entry.get(metric, [])
+                  if pt["d"] != today_str and pt["d"] >= cutoff]
+        series.append({"d": today_str, "v": val})
+        token_entry[metric] = sorted(series, key=lambda x: x["d"])
+
+
+async def seed_zscore_history() -> dict:
+    """One-time retroactive seed: slides a 30-day window over the stored raw
+    metrics and computes a daily z-score for each date where ≥5 points exist.
+    Call POST /seed_zscore_history after a 90-day backfill completes."""
+    if not DATA_FILE.exists():
+        return {"error": "no data file — run backfill first"}
+    state   = json.loads(DATA_FILE.read_text())
+    universe = state.get("universe", [])
+    history  = {"as_of": state.get("as_of"), "series": {}}
+    total_dates = 0
+
+    for token in universe:
+        token_id = token["id"]
+        symbol   = token.get("symbol", "")
+        metrics  = token.get("metrics", {})
+
+        # Union of all dates present across metrics
+        all_dates = sorted({pt["d"] for m in metrics.values() for pt in m})
+        history["series"][token_id] = {"symbol": symbol}
+
+        for d_str in all_dates:
+            # Build 30-point window ending on d_str for each metric
+            windowed: dict[str, list] = {}
+            for m_name, series in metrics.items():
+                pts = sorted((pt for pt in series if pt["d"] <= d_str),
+                             key=lambda x: x["d"])
+                windowed[m_name] = pts[-ZSCORE_WINDOW:]
+
+            zs = compute_zscores(windowed)
+            for metric, val in zs.items():
+                if val is None:
+                    continue
+                history["series"][token_id].setdefault(metric, []).append(
+                    {"d": d_str, "v": val}
+                )
+        total_dates += len(all_dates)
+
+    _write_zscore_history(history)
+    return {"seeded_tokens": len(universe), "total_date_points": total_dates}
 
 
 def merge_metric_series(existing: list, today: date, value: float | None) -> list:
@@ -169,3 +245,12 @@ async def run_ingest() -> None:
     write_atomic(state)
     size_kb = DATA_FILE.stat().st_size // 1024
     print(f"[ingest] wrote {DATA_FILE} — {len(new_universe)} tokens, ~{size_kb}KB")
+
+    # Append today's z-scores to rolling history
+    zs_history = _load_zscore_history()
+    for entry in new_universe:
+        _append_zscore_history(entry["id"], entry["symbol"], today,
+                               entry["zscores"], zs_history)
+    zs_history["as_of"] = today.isoformat()
+    _write_zscore_history(zs_history)
+    print(f"[ingest] updated zscore history — {len(zs_history['series'])} tokens")

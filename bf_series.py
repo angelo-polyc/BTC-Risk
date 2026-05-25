@@ -25,7 +25,7 @@ def coerce_float(x) -> Optional[float]:
     return f
 
 
-def last_n(series: Iterable[dict], n: int = 30) -> list[dict]:
+def last_n(series: Iterable[dict], n: int = 92) -> list[dict]:
     """Sort ascending by `d`, drop entries with missing values, dedupe by date
     (last value wins), and return the trailing `n`. Idempotent."""
     by_date: dict[str, float] = {}
