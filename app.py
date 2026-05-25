@@ -69,6 +69,23 @@ async def manual_ingest(x_api_key: str | None = None):
     asyncio.create_task(run_ingest())
     return {"status": "started"}
 
+@app.get("/checkpoint")
+async def checkpoint_status(x_api_key: str | None = None):
+    """Read the in-progress .tmp checkpoint file — shows backfill progress."""
+    if API_KEY and x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    tmp = DATA_FILE.with_suffix(".tmp")
+    if not tmp.exists():
+        return {"status": "no checkpoint", "oi": 0, "tokens": 0}
+    d = json.loads(tmp.read_text())
+    u = d.get("universe", [])
+    return {
+        "status": "in_progress",
+        "tokens_so_far": len(u),
+        "oi": sum(1 for t in u if t["metrics"].get("oi")),
+        "tvl": sum(1 for t in u if t["metrics"].get("tvl")),
+    }
+
 @app.post("/backfill")
 async def manual_backfill(x_api_key: str | None = None, symbol: str | None = None):
     """Seed 30d history. Optional ?symbol=BTC to backfill a single token."""
