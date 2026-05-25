@@ -474,7 +474,9 @@ async def _fetch_top_300(client: httpx.AsyncClient) -> list[dict]:
             headers=headers,
             timeout=30,
         )
-        r.raise_for_status()
+        if r.status_code != 200:
+            print(f"[universe] _fetch_top_300 page {page} returned {r.status_code}")
+            break
         out.extend(r.json())
         if len(out) >= 300:
             break
@@ -530,9 +532,13 @@ async def _fetch_coinglass_supported(client: httpx.AsyncClient) -> set[str]:
 
 
 async def _fetch_defillama_protocols(client: httpx.AsyncClient) -> dict[str, str]:
-    r = await client.get("https://api.llama.fi/protocols", timeout=60)
-    r.raise_for_status()
-    return {p["gecko_id"]: p["slug"] for p in r.json() if p.get("gecko_id")}
+    try:
+        r = await client.get("https://api.llama.fi/protocols", timeout=60)
+        r.raise_for_status()
+        return {p["gecko_id"]: p["slug"] for p in r.json() if p.get("gecko_id")}
+    except Exception as e:
+        print(f"[universe] _fetch_defillama_protocols failed: {e}")
+        return {}
 
 
 async def resolve_universe(

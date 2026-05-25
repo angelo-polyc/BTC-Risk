@@ -75,12 +75,16 @@ async def main() -> None:
         await api.prep_run()
         print("[backfill] prep_run done")
 
-        universe = await resolve_universe(
-            top_n=300,
-            exclude_categories=EXCLUDE_CATEGORIES,
-            exclude_tokens=PRESET_TOKENS,
-            api=api,
-        )
+        try:
+            universe = await resolve_universe(
+                top_n=300,
+                exclude_categories=EXCLUDE_CATEGORIES,
+                exclude_tokens=PRESET_TOKENS,
+                api=api,
+            )
+        except Exception as e:
+            print(f"[backfill] resolve_universe FAILED: {type(e).__name__}: {e}")
+            return
         print(f"[backfill] universe: {len(universe)} tokens")
 
         # Sequential per-token with 1s pacing — avoids burst that triggers
