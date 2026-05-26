@@ -94,7 +94,7 @@ async def manual_ingest(x_api_key: str | None = None):
 async def scores_history(x_api_key: str | None = None, days: int = 90):
     """Rolling rank_pct history. Returns dates × tokens matrix."""
     _auth(x_api_key)
-    hist = load_history(DATA_DIR, days=min(days, 90))
+    hist = load_history(DATA_DIR, days=min(days, 365))
     if hist is None or hist.empty:
         raise HTTPException(status_code=503, detail="no history yet — run POST /backfill")
     return {

@@ -141,7 +141,7 @@ def compute_scores(
 # History helpers                                                              #
 # --------------------------------------------------------------------------- #
 
-HISTORY_RETENTION = 90  # days
+HISTORY_RETENTION = 365  # days
 
 
 def compute_history(

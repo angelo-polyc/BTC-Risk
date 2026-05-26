@@ -16,9 +16,9 @@ from scorer import compute_scores, load_panels, write_scores, append_history
 from universe import load_symbols
 
 DATA_DIR       = Path(os.environ.get("DATA_DIR", "/data"))
-PRICE_RETENTION = 220   # days kept in spot_prices.parquet
-CVD_RETENTION   = 100   # days kept in taker_buy/sell.parquet
-FUND_RETENTION  = 100   # days kept in funding.parquet
+PRICE_RETENTION = 430   # days kept in spot_prices.parquet
+CVD_RETENTION   = 385   # days kept in taker_buy/sell.parquet
+FUND_RETENTION  = 385   # days kept in funding.parquet
 PULL_DAYS       = 5     # how many recent days to pull per ingest run
 
 

@@ -20,9 +20,9 @@ from scorer import compute_scores, write_scores, compute_history, append_history
 from universe import load_symbols
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
-PRICE_DAYS = 220
-CVD_DAYS   = 100
-FUND_DAYS  = 100
+PRICE_DAYS = 430   # 365d scores + 62d warmup (60d rolling beta + 2-day skip)
+CVD_DAYS   = 385   # 365d + 16d warmup + buffer
+FUND_DAYS  = 385
 
 
 async def main() -> None:
