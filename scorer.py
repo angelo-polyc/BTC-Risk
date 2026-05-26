@@ -107,11 +107,21 @@ def compute_scores(
     btc_ma200  = float(btc_series.rolling(200).mean().iloc[-1])
     gate_on    = bool(btc_price > btc_ma200)
 
+    # Component values at latest date (for heatmap / breakdown)
+    z_res_latest  = z_res.loc[latest_date]
+    z_r14_latest  = z_r14.loc[latest_date]
+    z_r7_latest   = z_r7.loc[latest_date]
+    p_cvd_latest  = p_cvd.loc[latest_date]
+
     scores_list = [
         {
             "symbol":   sym,
             "score":    round(float(latest_scores[sym]), 4),
             "rank_pct": round(float(latest_ranks[sym]),  4),
+            "res14_z":  round(float(z_res_latest[sym]),  3) if pd.notna(z_res_latest.get(sym)) else None,
+            "raw14_z":  round(float(z_r14_latest[sym]),  3) if pd.notna(z_r14_latest.get(sym)) else None,
+            "raw7_z":   round(float(z_r7_latest[sym]),   3) if pd.notna(z_r7_latest.get(sym))  else None,
+            "cvd_pct":  round(float(p_cvd_latest[sym]),  3) if pd.notna(p_cvd_latest.get(sym)) else None,
         }
         for sym in latest_scores.index
     ]
