@@ -80,3 +80,21 @@ async def manual_backfill(x_api_key: str | None = None):
     _auth(x_api_key)
     asyncio.create_task(run_backfill())
     return {"status": "started — backfill runs in background, takes 10-20 min"}
+
+
+@app.get("/debug")
+async def debug(x_api_key: str | None = None):
+    """Reports parquet shapes, CG map size, and last log lines."""
+    _auth(x_api_key)
+    import pandas as pd
+    from sources import _CG_ID_MAP
+    result = {"cg_id_map_size": len(_CG_ID_MAP)}
+    for name in ["spot_prices", "taker_buy", "taker_sell", "funding"]:
+        p = DATA_DIR / f"{name}.parquet"
+        if p.exists():
+            df = pd.read_parquet(p)
+            result[name] = {"tokens": df.shape[1], "days": df.shape[0],
+                            "first": str(df.index[0].date()), "last": str(df.index[-1].date())}
+        else:
+            result[name] = "missing"
+    return result
