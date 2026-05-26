@@ -88,12 +88,12 @@ async def main() -> None:
         scores = compute_scores(prices_df, buy_df, sell_df)
         write_scores(scores, DATA_DIR)
 
-        # Seed full 90-day history from parquets
-        print("[backfill] seeding 90d score history...")
-        hist_df = compute_history(prices_df, buy_df, sell_df, days=90)
-        for date, row in hist_df.iterrows():
-            append_history(row, str(date.date()), DATA_DIR)
-        print(f"[backfill] history seeded: {len(hist_df)} dates")
+        # Seed full 1-year history from parquets — write in one shot
+        from scorer import HISTORY_RETENTION
+        print(f"[backfill] seeding {HISTORY_RETENTION}d score history...")
+        hist_df = compute_history(prices_df, buy_df, sell_df, days=HISTORY_RETENTION)
+        hist_df.to_parquet(DATA_DIR / "scores_history.parquet")
+        print(f"[backfill] history seeded: {len(hist_df)} dates × {hist_df.shape[1]} tokens")
     except Exception as e:
         print(f"[backfill] scoring failed: {e}")
 
