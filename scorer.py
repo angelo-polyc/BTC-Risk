@@ -89,11 +89,12 @@ def compute_scores(
     z_r7   = _xs_zscore(raw_7d)
     p_cvd  = _xs_pct_rank(cvd_14d_sum)
 
-    # ---- composite (require at least 3 of 4 components) ----
-    composite = (z_res + z_r14 + z_r7 + p_cvd) / 4
-    n_valid   = z_res.notna().astype(int) + z_r14.notna().astype(int) + \
-                z_r7.notna().astype(int)  + p_cvd.notna().astype(int)
-    composite = composite.where(n_valid >= 3)
+    # ---- composite (NaN-tolerant mean, require at least 3 of 4 components) ----
+    # Tokens without CVD score on 3 price components; tokens with CVD score on 4.
+    n_valid = (z_res.notna().astype(int) + z_r14.notna().astype(int) +
+               z_r7.notna().astype(int)  + p_cvd.notna().astype(int))
+    total   = z_res.fillna(0) + z_r14.fillna(0) + z_r7.fillna(0) + p_cvd.fillna(0)
+    composite = (total / n_valid).where(n_valid >= 3)
 
     # ---- latest scores ----
     latest_date  = composite.dropna(how="all").index[-1]

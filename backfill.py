@@ -43,7 +43,8 @@ async def main() -> None:
                 print(f"[backfill] {sym}: price={len(prices)} cvd={len(cvd)} funding={len(funding)}")
                 return sym, prices, cvd, funding
 
-        results = await asyncio.gather(*(pull(s) for s in symbols))
+        results = await asyncio.gather(*(pull(s) for s in symbols), return_exceptions=True)
+    results = [r for r in results if not isinstance(r, Exception)]
 
     # Build panels
     price_dict, buy_dict, sell_dict, fund_dict = {}, {}, {}, {}

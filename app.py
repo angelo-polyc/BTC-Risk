@@ -18,6 +18,20 @@ SCORES    = DATA_DIR / "scores.json"
 API_KEY   = os.environ.get("READ_API_KEY")
 
 scheduler = AsyncIOScheduler(timezone="UTC")
+_pipeline_lock = asyncio.Lock()  # prevents backfill and ingest from running simultaneously
+
+
+async def _safe_ingest():
+    if _pipeline_lock.locked():
+        print("[app] ingest skipped — pipeline already running")
+        return
+    async with _pipeline_lock:
+        await run_ingest()
+
+
+async def _safe_backfill():
+    async with _pipeline_lock:
+        await run_backfill()
 
 
 def _auth(key: str | None) -> None:
@@ -28,8 +42,8 @@ def _auth(key: str | None) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    scheduler.add_job(run_ingest, CronTrigger(hour=2,  minute=0),  id="dubai_open")
-    scheduler.add_job(run_ingest, CronTrigger(hour=13, minute=35), id="ny_open")
+    scheduler.add_job(_safe_ingest, CronTrigger(hour=2,  minute=0),  id="dubai_open")
+    scheduler.add_job(_safe_ingest, CronTrigger(hour=13, minute=35), id="ny_open")
     scheduler.start()
     print("[startup] scheduler started:", [j.id for j in scheduler.get_jobs()])
     yield
@@ -78,7 +92,7 @@ async def manual_ingest(x_api_key: str | None = None):
 @app.post("/backfill")
 async def manual_backfill(x_api_key: str | None = None):
     _auth(x_api_key)
-    asyncio.create_task(run_backfill())
+    asyncio.create_task(_safe_backfill())
     return {"status": "started — backfill runs in background, takes 10-20 min"}
 
 
