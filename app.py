@@ -20,15 +20,13 @@ DATA_FILE = DATA_DIR / "divergence.json"
 _background_tasks: set = set()
 API_KEY = os.environ.get("READ_API_KEY")
 
-scheduler = AsyncIOScheduler(timezone="UTC")
+scheduler = AsyncIOScheduler(timezone="America/New_York")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    # 02:00 UTC = 06:00 Dubai
-    scheduler.add_job(run_ingest, CronTrigger(hour=2, minute=0), id="dubai_open")
-    # 13:35 UTC = 09:35 NY EDT (accepts 1hr drift in EST winter)
-    scheduler.add_job(run_ingest, CronTrigger(hour=13, minute=35), id="ny_open")
+    scheduler.add_job(run_ingest, CronTrigger(hour=6,  minute=0), id="ny_morning")
+    scheduler.add_job(run_ingest, CronTrigger(hour=18, minute=0), id="ny_evening")
     scheduler.start()
     print("[startup] scheduler started; jobs:", [j.id for j in scheduler.get_jobs()])
     yield
