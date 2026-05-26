@@ -235,13 +235,13 @@ class SourceAPI:
             if row:
                 # Primary path: coins-markets (pre-aggregated)
                 oi = row.get("open_interest_usd")
-                long_vol = row.get("long_volume_usd_24h") or 0
-                short_vol = row.get("short_volume_usd_24h") or 0
-                perp_vol = (long_vol + short_vol) or None
                 long_liq = row.get("long_liquidation_usd_24h") or 0
                 short_liq = row.get("short_liquidation_usd_24h") or 0
                 liq_oi = (long_liq + short_liq) / oi if oi else None
-                apr = await self._cglass_funding_apr(sym)
+                apr, perp_vol = await asyncio.gather(
+                    self._cglass_funding_apr(sym),
+                    self._cglass_perp_vol_today(sym),
+                )
                 return DerivsResult(oi=oi, funding_apr=apr, perp_vol=perp_vol, liq_oi_ratio=liq_oi)
             else:
                 # Fallback: pairs-markets aggregation for tokens outside coins-markets top-500
@@ -251,10 +251,13 @@ class SourceAPI:
             return None
 
     async def _cglass_derivs_from_pairs(self, symbol: str) -> DerivsResult | None:
-        """Aggregate OI, funding, vol, liqs from pairs-markets for tokens outside top-500."""
+        """Aggregate OI, funding, liqs from pairs-markets for tokens outside top-500.
+        perp_vol comes from _cglass_perp_vol_today (same 3-exchange scope as backfill)."""
         try:
-            r = await self._cglass_get("/api/futures/pairs-markets",
-                                        params={"symbol": symbol})
+            r, perp_vol = await asyncio.gather(
+                self._cglass_get("/api/futures/pairs-markets", params={"symbol": symbol}),
+                self._cglass_perp_vol_today(symbol),
+            )
             rows = r.get("data", [])
             if not rows:
                 return None
@@ -262,13 +265,12 @@ class SourceAPI:
             # 1h settlement venues (others assumed 8h)
             HOURLY = {"Hyperliquid", "Kraken", "Coinbase", "Crypto.com"}
 
-            total_oi, total_vol, total_liq_l, total_liq_s = 0.0, 0.0, 0.0, 0.0
+            total_oi, total_liq_l, total_liq_s = 0.0, 0.0, 0.0
             weighted_apr, weight = 0.0, 0.0
 
             for row in rows:
                 oi = float(row.get("open_interest_usd") or 0)
                 total_oi += oi
-                total_vol += float(row.get("volume_usd") or 0)
                 total_liq_l += float(row.get("long_liquidation_usd_24h") or 0)
                 total_liq_s += float(row.get("short_liquidation_usd_24h") or 0)
                 rate = row.get("funding_rate")
@@ -285,7 +287,7 @@ class SourceAPI:
             return DerivsResult(
                 oi=total_oi,
                 funding_apr=(weighted_apr / weight) if weight > 0 else None,
-                perp_vol=total_vol or None,
+                perp_vol=perp_vol,
                 liq_oi_ratio=(total_liq_l + total_liq_s) / total_oi if total_oi else None,
             )
         except Exception as e:
@@ -497,6 +499,31 @@ class SourceAPI:
                                    timeout=httpx.Timeout(connect=5.0, read=15.0, write=5.0, pool=5.0))
         r.raise_for_status()
         return r.json()
+
+    async def _cglass_perp_vol_today(self, symbol: str) -> float | None:
+        """Perp vol using the same Binance+OKX+Bybit scope as the backfill series.
+        Keeps ingest and backfill on an identical exchange basis so z-scores are valid."""
+        now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+        start_ms = now_ms - 2 * 24 * 3600 * 1000
+        try:
+            r = await self._cglass_get(
+                "/api/futures_spot_volume_ratio",
+                params={
+                    "exchange_list": "Binance,OKX,Bybit",
+                    "symbol": symbol,
+                    "interval": "1d",
+                    "start_time": start_ms,
+                    "end_time": now_ms,
+                },
+            )
+            rows = r.get("data") or []
+            if not rows:
+                return None
+            v = rows[-1].get("futures_vol_usd")
+            return float(v) if v is not None else None
+        except Exception as e:
+            print(f"[cglass perp_vol] {symbol}: {e}")
+            return None
 
     async def _cglass_funding_apr(self, symbol: str) -> float | None:
         fr_resp, oi_resp = await asyncio.gather(
