@@ -40,7 +40,8 @@ async def main() -> None:
                 prices  = await api.spot_history(sym,    limit=PRICE_DAYS)
                 cvd     = await api.cvd_history(sym,     limit=CVD_DAYS)
                 funding = await api.funding_history(sym, limit=FUND_DAYS)
-                print(f"[backfill] {sym}: price={len(prices)} cvd={len(cvd)} funding={len(funding)}")
+                src = "cg" if prices and prices[0].close > 0 else "cglass"
+                print(f"[backfill] {sym}: price={len(prices)}({src}) cvd={len(cvd)} funding={len(funding)}")
                 return sym, prices, cvd, funding
 
         results = await asyncio.gather(*(pull(s) for s in symbols), return_exceptions=True)
