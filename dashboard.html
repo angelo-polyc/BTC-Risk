@@ -2681,8 +2681,9 @@ function renderDivHistoryCanvas(metric) {
 
   const TOP_M   = 24;
   const CELL_H  = 18;          // fixed readable row height, scrolls vertically
-  const LABEL_W = 58;
-  const CELL_W  = (W - LABEL_W) / dates.length;  // fills full width
+  const LABEL_W  = 58;
+  const RIGHT_PAD = LABEL_W;  // mirror left label margin on the right
+  const CELL_W   = (W - LABEL_W - RIGHT_PAD) / dates.length;
   const canvasH = TOP_M + n * CELL_H;
 
   canvas.style.width  = W + "px";
