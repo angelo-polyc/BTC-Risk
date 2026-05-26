@@ -50,17 +50,20 @@ async def main() -> None:
     # Build panels
     price_dict, buy_dict, sell_dict, fund_dict = {}, {}, {}, {}
 
+    def dedup(series: pd.Series) -> pd.Series:
+        return series[~series.index.duplicated(keep="last")].sort_index()
+
     for sym, prices, cvd, funding in results:
         if prices:
             idx = pd.DatetimeIndex([r.date for r in prices])
-            price_dict[sym] = pd.Series([r.close for r in prices], index=idx)
+            price_dict[sym] = dedup(pd.Series([r.close for r in prices], index=idx))
         if cvd:
             idx = pd.DatetimeIndex([r.date for r in cvd])
-            buy_dict[sym]  = pd.Series([r.buy  for r in cvd], index=idx)
-            sell_dict[sym] = pd.Series([r.sell for r in cvd], index=idx)
+            buy_dict[sym]  = dedup(pd.Series([r.buy  for r in cvd], index=idx))
+            sell_dict[sym] = dedup(pd.Series([r.sell for r in cvd], index=idx))
         if funding:
             idx = pd.DatetimeIndex([r.date for r in funding])
-            fund_dict[sym] = pd.Series([r.close for r in funding], index=idx)
+            fund_dict[sym] = dedup(pd.Series([r.close for r in funding], index=idx))
 
     def _save(d: dict, name: str) -> None:
         if not d:
