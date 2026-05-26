@@ -172,7 +172,6 @@
   "NYM": "nym",
   "OKB": "okb",
   "OLAS": "autonolas",
-  "OM": "mantra",
   "OMNI": "omni-network",
   "ONDO": "ondo-finance",
   "OP": "optimism",
@@ -288,5 +287,8 @@
   "ZEREBRO": "zerebro",
   "ZK": "zksync",
   "ZRO": "layerzero",
-  "ZRX": "0x"
+  "ZRX": "0x",
+  "MANTRA": "mantra",
+  "BAN": "comedian",
+  "KTA": "keeta"
 }
