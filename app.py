@@ -17,7 +17,7 @@ DATA_DIR  = Path(os.environ.get("DATA_DIR", "/data"))
 SCORES    = DATA_DIR / "scores.json"
 API_KEY   = os.environ.get("READ_API_KEY")
 
-scheduler = AsyncIOScheduler(timezone="UTC")
+scheduler = AsyncIOScheduler(timezone="America/New_York")
 _pipeline_lock = asyncio.Lock()  # prevents backfill and ingest from running simultaneously
 
 
@@ -42,8 +42,8 @@ def _auth(key: str | None) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    scheduler.add_job(_safe_ingest, CronTrigger(hour=2,  minute=0),  id="dubai_open")
-    scheduler.add_job(_safe_ingest, CronTrigger(hour=13, minute=35), id="ny_open")
+    scheduler.add_job(_safe_ingest, CronTrigger(hour=6,  minute=0),  id="ny_morning")
+    scheduler.add_job(_safe_ingest, CronTrigger(hour=18, minute=0),  id="ny_evening")
     scheduler.start()
     print("[startup] scheduler started:", [j.id for j in scheduler.get_jobs()])
     yield
