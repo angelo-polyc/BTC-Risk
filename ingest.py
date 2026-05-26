@@ -19,6 +19,7 @@ DATA_DIR       = Path(os.environ.get("DATA_DIR", "/data"))
 PRICE_RETENTION = 430   # days kept in spot_prices.parquet
 CVD_RETENTION   = 385   # days kept in taker_buy/sell.parquet
 FUND_RETENTION  = 385   # days kept in funding.parquet
+LS_RETENTION    = 385   # days kept in ls_global.parquet (needs 60d warmup for ts-z)
 PULL_DAYS       = 5     # how many recent days to pull per ingest run
 
 
@@ -62,6 +63,7 @@ async def run_ingest() -> None:
     buy_df    = _load_or_empty(DATA_DIR / "taker_buy.parquet")
     sell_df   = _load_or_empty(DATA_DIR / "taker_sell.parquet")
     fund_df   = _load_or_empty(DATA_DIR / "funding.parquet")
+    ls_df     = _load_or_empty(DATA_DIR / "ls_global.parquet")
 
     async with SourceAPI() as api:
         await api.warm_supported()
@@ -70,15 +72,16 @@ async def run_ingest() -> None:
 
         async def pull(sym: str):
             async with sem:
-                prices  = await api.spot_history(sym,    limit=PULL_DAYS)
-                cvd     = await api.cvd_history(sym,     limit=PULL_DAYS)
-                funding = await api.funding_history(sym, limit=PULL_DAYS)
-                return sym, prices, cvd, funding
+                prices  = await api.spot_history(sym,     limit=PULL_DAYS)
+                cvd     = await api.cvd_history(sym,      limit=PULL_DAYS)
+                funding = await api.funding_history(sym,  limit=PULL_DAYS)
+                ls      = await api.ls_global_history(sym, limit=PULL_DAYS)
+                return sym, prices, cvd, funding, ls
 
         results = await asyncio.gather(*(pull(s) for s in symbols))
 
     # Merge new data into panels
-    for sym, prices, cvd, funding in results:
+    for sym, prices, cvd, funding, ls in results:
         if prices:
             existing = prices_df[sym] if sym in prices_df.columns else pd.Series(dtype=float)
             prices_df[sym] = _merge(existing, prices, "close")
@@ -90,23 +93,28 @@ async def run_ingest() -> None:
         if funding:
             ex_fund = fund_df[sym] if sym in fund_df.columns else pd.Series(dtype=float)
             fund_df[sym] = _merge(ex_fund, funding, "close")
+        if ls:
+            ex_ls = ls_df[sym] if sym in ls_df.columns else pd.Series(dtype=float)
+            ls_df[sym] = _merge(ex_ls, ls, "close")
 
     # Trim to retention limits and save
     prices_df = _trim(prices_df.sort_index(), PRICE_RETENTION)
     buy_df    = _trim(buy_df.sort_index(),    CVD_RETENTION)
     sell_df   = _trim(sell_df.sort_index(),   CVD_RETENTION)
     fund_df   = _trim(fund_df.sort_index(),   FUND_RETENTION)
+    ls_df     = _trim(ls_df.sort_index(),     LS_RETENTION)
 
     prices_df.to_parquet(DATA_DIR / "spot_prices.parquet")
     buy_df.to_parquet(DATA_DIR   / "taker_buy.parquet")
     sell_df.to_parquet(DATA_DIR  / "taker_sell.parquet")
     fund_df.to_parquet(DATA_DIR  / "funding.parquet")
+    ls_df.to_parquet(DATA_DIR    / "ls_global.parquet")
 
-    print(f"[ingest] saved panels — prices={prices_df.shape} cvd_buy={buy_df.shape}")
+    print(f"[ingest] saved panels — prices={prices_df.shape} cvd_buy={buy_df.shape} ls={ls_df.shape}")
 
     # Recompute scores
     try:
-        scores = compute_scores(prices_df, buy_df, sell_df)
+        scores = compute_scores(prices_df, buy_df, sell_df, ls_df)
         write_scores(scores, DATA_DIR)
         # Append today's rank_pct snapshot to history
         rank_row = pd.Series({s["symbol"]: s["rank_pct"] for s in scores["scores"]})

@@ -221,3 +221,37 @@ class SourceAPI:
         except Exception as e:
             print(f"[sources] funding {symbol}: {e}")
             return []
+
+    # ------------------------------------------------------------------ #
+    # L/S global account ratio                                            #
+    # ------------------------------------------------------------------ #
+
+    async def ls_global_history(self, symbol: str, limit: int = 100) -> list[DayBar]:
+        """Global long/short account ratio. Binance primary, Bybit fallback."""
+        if not self.supports(symbol):
+            return []
+        for exchange, pair in [("Binance", f"{symbol}USDT"), ("Bybit", f"{symbol}USDT")]:
+            try:
+                r = await self._get(
+                    "/api/futures/global-long-short-account-ratio/history",
+                    {"exchange": exchange, "symbol": pair, "interval": "1d", "limit": limit},
+                )
+                data = r.get("data") or []
+                if len(data) < 5:
+                    continue
+                out = []
+                for row in data:
+                    ts = row.get("time") or row.get("t")
+                    if ts and ts > 1e12:
+                        ts /= 1000
+                    val = row.get("global_account_long_short_ratio")
+                    if ts and val is not None:
+                        out.append(DayBar(
+                            date=datetime.fromtimestamp(ts, tz=timezone.utc).date(),
+                            close=float(val),
+                        ))
+                if out:
+                    return sorted(out, key=lambda x: x.date)
+            except Exception as e:
+                print(f"[sources] ls_global {symbol} {exchange}: {e}")
+        return []

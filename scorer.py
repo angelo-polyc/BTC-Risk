@@ -34,9 +34,10 @@ def _xs_pct_rank(panel: pd.DataFrame) -> pd.DataFrame:
 # --------------------------------------------------------------------------- #
 
 def compute_scores(
-    prices:   pd.DataFrame,
-    cvd_buy:  pd.DataFrame,
-    cvd_sell: pd.DataFrame,
+    prices:    pd.DataFrame,
+    cvd_buy:   pd.DataFrame,
+    cvd_sell:  pd.DataFrame,
+    ls_global: pd.DataFrame | None = None,
 ) -> dict:
     """
     Returns a dict ready to be serialised as scores.json:
@@ -113,15 +114,30 @@ def compute_scores(
     z_r7_latest   = z_r7.loc[latest_date]
     p_cvd_latest  = p_cvd.loc[latest_date]
 
+    # L/S extreme short flag: ts-z of ls_global ratio vs 60d history < -1.0
+    # Crowded shorts within a high-momentum name = potential squeeze amplifier.
+    # Low-confidence screener annotation only — do not use as a composite input.
+    if ls_global is not None and not ls_global.empty:
+        ls_g       = ls_global.reindex(index=prices.index, columns=prices.columns)
+        ls_mean60  = ls_g.rolling(60, min_periods=30).mean()
+        ls_std60   = ls_g.rolling(60, min_periods=30).std().replace(0, np.nan)
+        ls_tsz     = (ls_g - ls_mean60) / ls_std60
+        ls_ext_short_latest = ls_tsz.loc[latest_date] if latest_date in ls_tsz.index else pd.Series(dtype=float)
+    else:
+        ls_ext_short_latest = pd.Series(dtype=float)
+
     scores_list = [
         {
-            "symbol":   sym,
-            "score":    round(float(latest_scores[sym]), 4),
-            "rank_pct": round(float(latest_ranks[sym]),  4),
-            "res14_z":  round(float(z_res_latest[sym]),  3) if pd.notna(z_res_latest.get(sym)) else None,
-            "raw14_z":  round(float(z_r14_latest[sym]),  3) if pd.notna(z_r14_latest.get(sym)) else None,
-            "raw7_z":   round(float(z_r7_latest[sym]),   3) if pd.notna(z_r7_latest.get(sym))  else None,
-            "cvd_pct":  round(float(p_cvd_latest[sym]),  3) if pd.notna(p_cvd_latest.get(sym)) else None,
+            "symbol":       sym,
+            "score":        round(float(latest_scores[sym]), 4),
+            "rank_pct":     round(float(latest_ranks[sym]),  4),
+            "res14_z":      round(float(z_res_latest[sym]),  3) if pd.notna(z_res_latest.get(sym)) else None,
+            "raw14_z":      round(float(z_r14_latest[sym]),  3) if pd.notna(z_r14_latest.get(sym)) else None,
+            "raw7_z":       round(float(z_r7_latest[sym]),   3) if pd.notna(z_r7_latest.get(sym))  else None,
+            "cvd_pct":      round(float(p_cvd_latest[sym]),  3) if pd.notna(p_cvd_latest.get(sym)) else None,
+            "ls_ext_short": bool(ls_ext_short_latest[sym] < -1.0)
+                            if sym in ls_ext_short_latest.index and pd.notna(ls_ext_short_latest[sym])
+                            else None,
         }
         for sym in latest_scores.index
     ]
