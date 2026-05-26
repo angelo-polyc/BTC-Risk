@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from ingest import run_ingest
 from backfill import main as run_backfill
+from scorer import load_history
 
 DATA_DIR  = Path(os.environ.get("DATA_DIR", "/data"))
 SCORES    = DATA_DIR / "scores.json"
@@ -87,6 +88,21 @@ async def manual_ingest(x_api_key: str | None = None):
     _auth(x_api_key)
     asyncio.create_task(run_ingest())
     return {"status": "started"}
+
+
+@app.get("/scores/history")
+async def scores_history(x_api_key: str | None = None, days: int = 90):
+    """Rolling rank_pct history. Returns dates × tokens matrix."""
+    _auth(x_api_key)
+    hist = load_history(DATA_DIR, days=min(days, 90))
+    if hist is None or hist.empty:
+        raise HTTPException(status_code=503, detail="no history yet — run POST /backfill")
+    return {
+        "dates":     [str(d.date()) for d in hist.index],
+        "tokens":    list(hist.columns),
+        "rank_pcts": [[round(v, 4) if v == v else None for v in row]
+                      for row in hist.values.tolist()],
+    }
 
 
 @app.post("/backfill")

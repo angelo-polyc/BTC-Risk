@@ -12,7 +12,7 @@ from pathlib import Path
 import pandas as pd
 
 from sources import SourceAPI
-from scorer import compute_scores, load_panels, write_scores
+from scorer import compute_scores, load_panels, write_scores, append_history
 from universe import load_symbols
 
 DATA_DIR       = Path(os.environ.get("DATA_DIR", "/data"))
@@ -108,6 +108,10 @@ async def run_ingest() -> None:
     try:
         scores = compute_scores(prices_df, buy_df, sell_df)
         write_scores(scores, DATA_DIR)
+        # Append today's rank_pct snapshot to history
+        rank_row = pd.Series({s["symbol"]: s["rank_pct"] for s in scores["scores"]})
+        append_history(rank_row, scores["as_of"][:10], DATA_DIR)
+        print(f"[ingest] history updated")
     except Exception as e:
         print(f"[ingest] scoring failed: {e}")
         raise

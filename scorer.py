@@ -138,6 +138,93 @@ def compute_scores(
 
 
 # --------------------------------------------------------------------------- #
+# History helpers                                                              #
+# --------------------------------------------------------------------------- #
+
+HISTORY_RETENTION = 90  # days
+
+
+def compute_history(
+    prices: pd.DataFrame,
+    cvd_buy: pd.DataFrame,
+    cvd_sell: pd.DataFrame,
+    days: int = HISTORY_RETENTION,
+) -> pd.DataFrame:
+    """
+    Compute daily composite rank_pct for all tokens over the last `days` calendar days.
+    Returns a DataFrame: index=date, columns=symbol, values=rank_pct [0,1].
+    """
+    prices_c = prices
+    buy_c    = cvd_buy.reindex(index=prices.index, columns=prices.columns)
+    sell_c   = cvd_sell.reindex(index=prices.index, columns=prices.columns)
+
+    skip = 2
+    btc      = prices_c["BTC"] if "BTC" in prices_c else prices_c.iloc[:, 0]
+    log_btc  = np.log(btc).diff()
+    btc_var  = log_btc.rolling(60).var()
+    tok_14d  = np.log(prices_c.shift(skip)) - np.log(prices_c.shift(skip + 14))
+    btc_14d  = np.log(btc.shift(skip)) - np.log(btc.shift(skip + 14))
+
+    residual_parts = {}
+    for sym in prices_c.columns:
+        cov  = np.log(prices_c[sym]).diff().rolling(60).cov(log_btc)
+        beta = (cov / btc_var).shift(skip)
+        residual_parts[sym] = tok_14d[sym] - beta * btc_14d
+    residual_14d = pd.DataFrame(residual_parts)
+
+    raw_14d     = prices_c.shift(skip) / prices_c.shift(skip + 14) - 1
+    raw_7d      = prices_c.shift(skip) / prices_c.shift(skip + 7)  - 1
+    cvd_14d_sum = (buy_c - sell_c).shift(skip).rolling(14).sum()
+
+    z_res  = _xs_zscore(residual_14d)
+    z_r14  = _xs_zscore(raw_14d)
+    z_r7   = _xs_zscore(raw_7d)
+    p_cvd  = _xs_pct_rank(cvd_14d_sum)
+
+    n_valid   = (z_res.notna().astype(int) + z_r14.notna().astype(int) +
+                 z_r7.notna().astype(int)  + p_cvd.notna().astype(int))
+    total     = z_res.fillna(0) + z_r14.fillna(0) + z_r7.fillna(0) + p_cvd.fillna(0)
+    composite = (total / n_valid).where(n_valid >= 3)
+
+    # Trim to last `days` calendar days with valid data
+    valid_dates = composite.dropna(how="all").index
+    cutoff      = valid_dates[-1] - pd.Timedelta(days=days - 1)
+    composite   = composite.loc[valid_dates[valid_dates >= cutoff]]
+
+    # Convert each row to rank_pct
+    return composite.rank(axis=1, pct=True, na_option="keep")
+
+
+def append_history(rank_pct_row: pd.Series, date_str: str, data_dir: Path) -> None:
+    """Append one day's rank_pct snapshot to scores_history.parquet."""
+    path = data_dir / "scores_history.parquet"
+    new_row = rank_pct_row.to_frame(name=date_str).T
+    new_row.index = pd.DatetimeIndex([date_str])
+
+    if path.exists():
+        hist = pd.read_parquet(path)
+        # Drop duplicate date if re-running same day, then append
+        hist = hist[hist.index != new_row.index[0]]
+        hist = pd.concat([hist, new_row]).sort_index()
+        # Trim to retention window
+        cutoff = hist.index[-1] - pd.Timedelta(days=HISTORY_RETENTION - 1)
+        hist = hist[hist.index >= cutoff]
+    else:
+        hist = new_row
+
+    hist.to_parquet(path)
+
+
+def load_history(data_dir: Path, days: int = HISTORY_RETENTION) -> pd.DataFrame | None:
+    """Load scores_history.parquet, return last `days` rows."""
+    path = data_dir / "scores_history.parquet"
+    if not path.exists():
+        return None
+    hist = pd.read_parquet(path).sort_index()
+    return hist.iloc[-days:]
+
+
+# --------------------------------------------------------------------------- #
 # I/O helpers                                                                  #
 # --------------------------------------------------------------------------- #
 

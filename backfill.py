@@ -16,7 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 from sources import SourceAPI
-from scorer import compute_scores, write_scores
+from scorer import compute_scores, write_scores, compute_history, append_history
 from universe import load_symbols
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
@@ -78,13 +78,22 @@ async def main() -> None:
     _save(sell_dict,  "taker_sell.parquet")
     _save(fund_dict,  "funding.parquet")
 
-    # Initial score
+    # Score + seed 90d history
     try:
         prices_df = pd.DataFrame(price_dict).sort_index()
         buy_df    = pd.DataFrame(buy_dict).sort_index()
         sell_df   = pd.DataFrame(sell_dict).sort_index()
-        scores    = compute_scores(prices_df, buy_df, sell_df)
+
+        # Today's scores
+        scores = compute_scores(prices_df, buy_df, sell_df)
         write_scores(scores, DATA_DIR)
+
+        # Seed full 90-day history from parquets
+        print("[backfill] seeding 90d score history...")
+        hist_df = compute_history(prices_df, buy_df, sell_df, days=90)
+        for date, row in hist_df.iterrows():
+            append_history(row, str(date.date()), DATA_DIR)
+        print(f"[backfill] history seeded: {len(hist_df)} dates")
     except Exception as e:
         print(f"[backfill] scoring failed: {e}")
 
