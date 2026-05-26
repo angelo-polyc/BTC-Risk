@@ -112,6 +112,23 @@ async def manual_backfill(x_api_key: str | None = None):
     return {"status": "started — backfill runs in background, takes 10-20 min"}
 
 
+@app.get("/prices")
+async def prices(x_api_key: str | None = None, days: int = 430):
+    """Return spot_prices parquet as JSON for downstream analysis."""
+    _auth(x_api_key)
+    import pandas as pd
+    p = DATA_DIR / "spot_prices.parquet"
+    if not p.exists():
+        raise HTTPException(status_code=503, detail="no price data")
+    df = pd.read_parquet(p).tail(days)
+    return {
+        "dates":   [str(d.date()) for d in df.index],
+        "tokens":  list(df.columns),
+        "prices":  [[None if v != v else round(float(v), 6) for v in row]
+                    for row in df.values.tolist()],
+    }
+
+
 @app.get("/debug")
 async def debug(x_api_key: str | None = None):
     """Reports parquet shapes, CG map size, and last log lines."""
