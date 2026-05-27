@@ -12,7 +12,6 @@ import asyncio
 import logging
 import os
 import time
-from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Optional
 
@@ -29,7 +28,6 @@ from bf_sources import (
     fetch_llama_dex_vol,
     fetch_llama_tvl,
 )
-from bf_zscores import compute_zscores
 from ingest import EXCLUDE_CATEGORIES, PRESET_TOKENS
 from ratelimit import TokenBucket
 

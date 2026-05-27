@@ -7,7 +7,8 @@ from typing import Any
 
 import asyncpg
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+# Railway provides postgres://, asyncpg requires postgresql://
+DATABASE_URL = os.environ.get("DATABASE_URL", "").replace("postgres://", "postgresql://", 1)
 
 RETENTION_DAYS       = 90
 ZSCORE_WINDOW        = 30
