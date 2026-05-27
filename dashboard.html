@@ -696,6 +696,206 @@
     white-space: pre;
     box-shadow: 0 2px 8px rgba(0,0,0,0.25);
   }
+
+  /* ═══ momentum tab ═══ */
+  #content-momentum { display: none; }
+
+  /* Screener table */
+  table.mom-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+    table-layout: fixed;
+  }
+  table.mom-table col.col-sym   { width: 9%; }
+  table.mom-table col.col-rank  { width: 22%; }
+  table.mom-table col.col-comp  { width: 46%; }
+  table.mom-table col.col-flags { width: 23%; }
+  table.mom-table th {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    text-align: left;
+    padding: 8px 14px 10px 0;
+    border-bottom: 1px solid var(--ink);
+  }
+  table.mom-table td {
+    padding: 8px 10px 8px 0;
+    border-bottom: 1px solid var(--rule-hair);
+    vertical-align: middle;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink);
+  }
+  table.mom-table td:first-child {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    color: var(--ink);
+  }
+  table.mom-table tr:last-child td { border-bottom: 1px solid var(--ink); }
+  table.mom-table tr.mom-bear-filtered td {
+    opacity: 0.40;
+  }
+  table.mom-table tr.mom-bear-filtered td:first-child::after {
+    content: " [bear filter]";
+    font-size: 9px;
+    color: var(--ink-softer);
+    font-weight: 400;
+    letter-spacing: 0.02em;
+  }
+
+  /* Rank bar */
+  .mom-rank-bar {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .mom-rank-bar-track {
+    flex: 1;
+    height: 6px;
+    background: var(--bg-soft);
+    border: 1px solid var(--rule-soft);
+    position: relative;
+    overflow: hidden;
+  }
+  .mom-rank-bar-fill {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+  }
+  .mom-rank-bar-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+    flex-shrink: 0;
+    width: 36px;
+    text-align: right;
+  }
+
+  /* Component bars */
+  .mom-comp-bars {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .mom-comp-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    flex: 1;
+  }
+  .mom-comp-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8.5px;
+    color: var(--ink-softer);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .mom-comp-bar-wrap {
+    width: 80px;
+    height: 14px;
+    position: relative;
+    background: var(--bg-soft);
+    border: 1px solid var(--rule-soft);
+    overflow: hidden;
+  }
+  .mom-comp-mid {
+    position: absolute;
+    left: 50%;
+    top: 0; bottom: 0;
+    width: 1px;
+    background: var(--rule);
+  }
+  .mom-comp-fill {
+    position: absolute;
+    top: 1px; bottom: 1px;
+  }
+
+  /* Flag pills */
+  .mom-flag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 6px;
+    border: 1px solid var(--rule);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.02em;
+    color: var(--ink-soft);
+    margin-right: 4px;
+    line-height: 1.4;
+  }
+  .mom-flag.cvd-warn { border-color: var(--bear); color: var(--bear); }
+  .mom-flag.ls-ext   { border-color: var(--bear); color: var(--bear); background: rgba(181,56,31,0.06); }
+
+  /* Heatmap wrap */
+  #mom-heatmap-wrap {
+    overflow: auto;
+    max-height: 78vh;
+    border: 1px solid var(--rule-soft);
+    border-radius: 2px;
+    background: white;
+    display: flex;
+    justify-content: center;
+  }
+  #mom-heatmap-canvas { display: block; cursor: crosshair; }
+  #mom-tooltip {
+    position: fixed;
+    background: var(--ink);
+    color: var(--bg);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    padding: 7px 11px;
+    pointer-events: none;
+    display: none;
+    z-index: 1001;
+    line-height: 1.75;
+    white-space: pre;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  }
+
+  /* Chart view */
+  #mom-chart-wrap {
+    display: none;
+  }
+  .mom-chart-panel {
+    position: relative;
+  }
+  .mom-chart-divider {
+    height: 1px;
+    background: var(--rule);
+    margin: 0;
+  }
+  .mom-chart-label {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 9.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 4px;
+  }
+  .mom-token-select-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+  }
+  #mom-token-select {
+    font-family: inherit;
+    font-size: 10.5px;
+    padding: 2px 6px;
+    border: 1px solid var(--rule);
+    background: var(--bg);
+    color: var(--ink);
+  }
 </style>
 </head>
 <body>
@@ -719,6 +919,7 @@
 <div class="tab-nav">
   <button id="tab-btn-model" class="active" type="button">Risk Model</button>
   <button id="tab-btn-divergence" type="button">Divergence Scanner</button>
+  <button id="tab-btn-momentum" type="button">Momentum</button>
 </div>
 
 <div id="content-model">
@@ -896,7 +1097,61 @@
 
 </div><!-- #content-divergence -->
 
+<!-- ═══ MOMENTUM SCREENER TAB ═══ -->
+<div id="content-momentum">
+
+<div class="sub-masthead">
+  <div class="kicker">Momentum Screener · live</div>
+  <div class="summary" id="mom-meta">— · awaiting load</div>
+</div>
+
+<section>
+  <div class="section-head">
+    <h2>Universe — Momentum Scores</h2>
+    <div class="section-head-right">
+      <div class="meta" id="mom-section-meta" style="margin-right:12px">—</div>
+      <div class="toggle" id="mom-q5-toggle">
+        <button data-q5="true" class="active">Q5</button>
+        <button data-q5="false">All</button>
+      </div>
+      <div class="toggle" id="mom-view-toggle" style="margin-left:8px">
+        <button data-view="screener" class="active">Screener</button>
+        <button data-view="heatmap">Heatmap</button>
+        <button data-view="chart">Chart</button>
+      </div>
+      <div class="mom-token-select-wrap" id="mom-token-select-wrap" style="display:none;margin-left:8px">
+        <span>Token:</span>
+        <select id="mom-token-select"></select>
+      </div>
+      <div class="actions" style="margin-left:8px">
+        <button id="btn-mom-refresh" type="button">↻ REFRESH</button>
+      </div>
+    </div>
+  </div>
+  <div id="mom-screener-wrap">
+    <div class="placeholder tall">screener · awaiting load</div>
+  </div>
+  <div id="mom-heatmap-wrap" style="display:none">
+    <canvas id="mom-heatmap-canvas"></canvas>
+  </div>
+  <div id="mom-chart-wrap" style="display:none">
+    <div id="mom-chart-loading" class="placeholder" style="display:none">loading price &amp; history data…</div>
+    <div id="mom-chart-price-block" class="chart-block">
+      <div class="mom-chart-label">Price (log scale)</div>
+      <canvas id="mom-price-canvas" style="display:block;width:100%"></canvas>
+    </div>
+    <div class="mom-chart-divider"></div>
+    <div id="mom-chart-rank-block" class="chart-block" style="margin-top:0">
+      <div class="mom-chart-label">Momentum rank_pct · 14d MA</div>
+      <canvas id="mom-rank-canvas" style="display:block;width:100%"></canvas>
+    </div>
+  </div>
+</section>
+
+</div><!-- #content-momentum -->
+
 <div id="div-tooltip"></div>
+<div id="mom-tooltip"></div>
 
 <script>
 /* ============================================================
@@ -919,6 +1174,10 @@ const API_BASE  = "";   /* same-origin; /dashboard is served by the API */
 const DIVERGENCE_URL     = "https://dud.up.railway.app/divergence.json?x_api_key=88554ffb2c8fb071f37cb6f6b3dced4d5ad8f57c8cbd37e4edad34a7e860edb1";
 const ZSCORE_HISTORY_URL = "https://dud.up.railway.app/zscore_history?x_api_key=88554ffb2c8fb071f37cb6f6b3dced4d5ad8f57c8cbd37e4edad34a7e860edb1";
 const FETCH_TIMEOUT_MS = 20000;
+
+const MOM_SCORES_URL  = "https://momentum-scanner.up.railway.app/scores?x_api_key=polychain";
+const MOM_HISTORY_URL = "https://momentum-scanner.up.railway.app/scores/history?x_api_key=polychain&days=365";
+const MOM_PRICES_URL  = "https://momentum-scanner.up.railway.app/prices?x_api_key=polychain&days=365";
 
 const HYPS = [
   { col: "macro_equities",     name: "Macro & Equities",    color: "var(--h-me)" },
@@ -2801,22 +3060,666 @@ function setupDivViewToggle() {
 function setupTabs() {
   const btnModel = document.getElementById("tab-btn-model");
   const btnDiv   = document.getElementById("tab-btn-divergence");
+  const btnMom   = document.getElementById("tab-btn-momentum");
   const cModel   = document.getElementById("content-model");
   const cDiv     = document.getElementById("content-divergence");
+  const cMom     = document.getElementById("content-momentum");
+
+  let _momLoaded = false;
 
   btnModel.addEventListener("click", () => {
-    btnModel.classList.add("active"); btnDiv.classList.remove("active");
-    cModel.style.display = ""; cDiv.style.display = "none";
+    btnModel.classList.add("active");
+    btnDiv.classList.remove("active");
+    btnMom.classList.remove("active");
+    cModel.style.display = "";
+    cDiv.style.display = "none";
+    cMom.style.display = "none";
   });
 
   btnDiv.addEventListener("click", () => {
-    btnDiv.classList.add("active"); btnModel.classList.remove("active");
-    cDiv.style.display = "block"; cModel.style.display = "none";
+    btnDiv.classList.add("active");
+    btnModel.classList.remove("active");
+    btnMom.classList.remove("active");
+    cDiv.style.display = "block";
+    cModel.style.display = "none";
+    cMom.style.display = "none";
     loadDivergence();
+  });
+
+  btnMom.addEventListener("click", () => {
+    btnMom.classList.add("active");
+    btnModel.classList.remove("active");
+    btnDiv.classList.remove("active");
+    cMom.style.display = "block";
+    cModel.style.display = "none";
+    cDiv.style.display = "none";
+    if (!_momLoaded) { _momLoaded = true; loadMomentumScores(); }
   });
 
   document.getElementById("btn-div-refresh").addEventListener("click", () => {
     loadDivergence(true);
+  });
+
+  document.getElementById("btn-mom-refresh").addEventListener("click", () => {
+    loadMomentumScores(true);
+  });
+}
+
+/* ── Momentum Screener ─────────────────────────────────────── */
+
+/* State */
+let _momScores      = null;
+let _momHistory     = null;
+let _momPrices      = null;
+let _momViewMode    = "screener";  // "screener" | "heatmap" | "chart"
+let _momQ5Only      = true;
+let _momChartToken  = "BTC";
+let _momHeatmapDrawn = false;
+let _momHeatmapHoverSetup = false;
+let _momHeatmapLayout = null;
+
+/* Color for rank_pct: 0 → red, 0.5 → white, 1 → green (same scheme as aucColor) */
+function momRankColor(val) {
+  if (val == null || !isFinite(val)) return "#e8e4d8";
+  const green = [46, 106, 59];
+  const white = [250, 248, 243];
+  const red   = [181, 56, 31];
+  let r, g, b;
+  if (val <= 0.5) {
+    const t = val / 0.5;
+    r = Math.round(red[0] + (white[0] - red[0]) * t);
+    g = Math.round(red[1] + (white[1] - red[1]) * t);
+    b = Math.round(red[2] + (white[2] - red[2]) * t);
+  } else {
+    const t = (val - 0.5) / 0.5;
+    r = Math.round(white[0] + (green[0] - white[0]) * t);
+    g = Math.round(white[1] + (green[1] - white[1]) * t);
+    b = Math.round(white[2] + (green[2] - white[2]) * t);
+  }
+  return "rgb(" + r + "," + g + "," + b + ")";
+}
+
+async function fetchWithTimeout(url) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!res.ok) throw new Error("http " + res.status);
+    return await res.json();
+  } catch(e) {
+    clearTimeout(t);
+    throw e;
+  }
+}
+
+async function loadMomentumScores(force = false) {
+  const metaEl = document.getElementById("mom-meta");
+  const wrap   = document.getElementById("mom-screener-wrap");
+  if (_momScores && !force) { renderMomentumScreener(); return; }
+  metaEl.textContent = "loading…";
+  wrap.innerHTML = `<div class="placeholder tall">loading momentum scores…</div>`;
+  try {
+    _momScores = await fetchWithTimeout(MOM_SCORES_URL);
+    const { regime, gate_on, n_tokens, as_of, btc_price } = _momScores;
+    const q5n = (_momScores.scores || []).filter(s => s.rank_pct >= 0.80).length;
+    metaEl.textContent =
+      `${n_tokens} tokens · regime ${regime} · gate ${gate_on ? "ON" : "OFF"} · BTC $${btc_price != null ? btc_price.toLocaleString() : "—"} · as of ${as_of ? as_of.slice(0,16).replace("T"," ") : "—"} UTC`;
+    document.getElementById("mom-section-meta").textContent =
+      `${q5n} in Q5 (rank_pct ≥ 0.80) of ${n_tokens}`;
+    /* Populate token selector from this universe */
+    _populateMomTokenSelect(_momScores.scores || []);
+    renderMomentumScreener();
+    /* If heatmap or chart is current view, also trigger those renders */
+    if (_momViewMode === "heatmap") loadMomentumHistory();
+    if (_momViewMode === "chart")   loadMomentumChart();
+  } catch(e) {
+    metaEl.textContent = "load failed: " + e.message;
+    wrap.innerHTML = `<div class="placeholder error">momentum scores load failed: ${e.message}</div>`;
+    console.error("[momentum scores]", e);
+  }
+}
+
+async function loadMomentumHistory() {
+  const metaEl = document.getElementById("mom-meta");
+  if (_momHistory) { renderMomentumHeatmap(); return; }
+  metaEl.textContent = metaEl.textContent + " · loading history…";
+  try {
+    _momHistory = await fetchWithTimeout(MOM_HISTORY_URL);
+    _momHeatmapDrawn = false;
+    renderMomentumHeatmap();
+  } catch(e) {
+    document.getElementById("mom-heatmap-wrap").innerHTML =
+      `<div class="placeholder error">history load failed: ${e.message}</div>`;
+    console.error("[momentum history]", e);
+  }
+}
+
+async function loadMomentumPrices() {
+  if (_momPrices) return;
+  try {
+    _momPrices = await fetchWithTimeout(MOM_PRICES_URL);
+  } catch(e) {
+    console.error("[momentum prices]", e);
+    throw e;
+  }
+}
+
+async function loadMomentumChart() {
+  const chartWrap   = document.getElementById("mom-chart-wrap");
+  const loadingDiv  = document.getElementById("mom-chart-loading");
+  if (_momHistory && _momPrices) { renderMomentumChart(_momChartToken); return; }
+  loadingDiv.style.display = "";
+  try {
+    const promises = [];
+    if (!_momHistory) promises.push(loadMomentumHistory());
+    if (!_momPrices)  promises.push(loadMomentumPrices());
+    await Promise.all(promises);
+    loadingDiv.style.display = "none";
+    renderMomentumChart(_momChartToken);
+  } catch(e) {
+    loadingDiv.style.display = "none";
+    document.getElementById("mom-chart-price-block").innerHTML =
+      `<div class="placeholder error">chart data load failed: ${e.message}</div>`;
+    console.error("[momentum chart load]", e);
+  }
+}
+
+function _populateMomTokenSelect(scores) {
+  const sel = document.getElementById("mom-token-select");
+  if (!sel) return;
+  const syms = [...new Set(scores.map(s => s.symbol))].sort();
+  sel.innerHTML = syms.map(s =>
+    `<option value="${s}"${s === _momChartToken ? " selected" : ""}>${s}</option>`
+  ).join("");
+}
+
+/* ─── View 1: Screener table ─── */
+function renderMomentumScreener() {
+  const wrap = document.getElementById("mom-screener-wrap");
+  if (!_momScores) {
+    wrap.innerHTML = `<div class="placeholder tall">screener · awaiting load</div>`;
+    return;
+  }
+  const { scores, gate_on, regime } = _momScores;
+  const bearMode = gate_on === false;  /* bear regime: gate off */
+  let rows = [...scores];
+  if (_momQ5Only) rows = rows.filter(r => r.rank_pct >= 0.80);
+  /* Already sorted best-first from API; re-sort All mode defensively */
+  rows.sort((a, b) => b.rank_pct - a.rank_pct);
+
+  if (!rows.length) {
+    wrap.innerHTML = `<div class="placeholder">no tokens match current filter</div>`;
+    return;
+  }
+
+  /* Component bar HTML — z-scores clip to ±2.5, CVD is 0-1 */
+  function compBar(val, isZscore, label) {
+    if (val == null) {
+      return `<div class="mom-comp-item">
+        <div class="mom-comp-label">${label}</div>
+        <div class="mom-comp-bar-wrap"><div class="mom-comp-mid"></div></div>
+      </div>`;
+    }
+    let frac;
+    if (isZscore) {
+      /* Map z-score: 0 at center (50%), ±2.5 → 0% / 100% */
+      frac = Math.max(-2.5, Math.min(2.5, val)) / 2.5;  /* -1 to +1 */
+    } else {
+      /* CVD: already 0-1, re-center around 0.5 */
+      frac = (Math.max(0, Math.min(1, val)) - 0.5) * 2;  /* -1 to +1 */
+    }
+    const isPos = frac >= 0;
+    const absW  = Math.abs(frac) * 50;  /* pct of half-width */
+    const left  = isPos ? "50%" : (50 - absW).toFixed(1) + "%";
+    const width = absW.toFixed(1) + "%";
+    const color = isPos ? "var(--bull)" : "var(--bear)";
+    return `<div class="mom-comp-item">
+      <div class="mom-comp-label">${label}</div>
+      <div class="mom-comp-bar-wrap">
+        <div class="mom-comp-mid"></div>
+        <div class="mom-comp-fill" style="left:${left};width:${width};background:${color};opacity:0.75;"></div>
+      </div>
+    </div>`;
+  }
+
+  const tableRows = rows.map(r => {
+    /* Bear filter: gate off AND raw14_z < 0 */
+    const filtered = bearMode && r.raw14_z != null && r.raw14_z < 0;
+    const rankPct  = r.rank_pct != null ? r.rank_pct : 0;
+    const rankFill = rankPct >= 0.80 ? "var(--bull)" : "var(--ink-softer)";
+
+    const rankBarHtml = `<div class="mom-rank-bar">
+      <div class="mom-rank-bar-track">
+        <div class="mom-rank-bar-fill" style="width:${(rankPct*100).toFixed(1)}%;background:${rankFill};opacity:0.75;"></div>
+      </div>
+      <div class="mom-rank-bar-val">${(rankPct*100).toFixed(0)}%</div>
+    </div>`;
+
+    const compHtml = `<div class="mom-comp-bars">
+      ${compBar(r.res14_z,   true,  "res14_z")}
+      ${compBar(r.raw14_z,   true,  "raw14_z")}
+      ${compBar(r.raw7_z,    true,  "raw7_z")}
+      ${compBar(r.cvd_pct,   false, "cvd_pct")}
+    </div>`;
+
+    let flagsHtml = "";
+    if (r.cvd_pct != null && r.cvd_pct < 0.5) {
+      flagsHtml += `<span class="mom-flag cvd-warn">CVD↓</span>`;
+    }
+    if (r.ls_ext_short === true) {
+      flagsHtml += `<span class="mom-flag ls-ext">⚡</span>`;
+    }
+
+    return `<tr class="${filtered ? "mom-bear-filtered" : ""}">
+      <td>${r.symbol}</td>
+      <td>${rankBarHtml}</td>
+      <td>${compHtml}</td>
+      <td>${flagsHtml}</td>
+    </tr>`;
+  }).join("");
+
+  wrap.innerHTML = `
+    <table class="mom-table">
+      <colgroup>
+        <col class="col-sym">
+        <col class="col-rank">
+        <col class="col-comp">
+        <col class="col-flags">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Rank</th>
+          <th style="padding-left:0">Components (res14_z · raw14_z · raw7_z · cvd_pct)</th>
+          <th>Flags</th>
+        </tr>
+      </thead>
+      <tbody>${tableRows}</tbody>
+    </table>`;
+}
+
+/* ─── View 2: Heatmap (14d MA of rank_pct) ─── */
+
+const MOM_HM_CELL_H  = 16;
+const MOM_HM_LABEL_W = 60;
+const MOM_HM_TOP_M   = 28;
+const MOM_HM_RIGHT_P = 4;
+const MOM_HM_MAX_TOKENS = 80;
+
+function renderMomentumHeatmap() {
+  const wrap   = document.getElementById("mom-heatmap-wrap");
+  const canvas = document.getElementById("mom-heatmap-canvas");
+  if (!_momHistory) {
+    wrap.innerHTML = `<div class="placeholder tall">history · awaiting load</div>`;
+    return;
+  }
+  /* Ensure canvas is back in place */
+  if (!canvas.parentNode || canvas.parentNode !== wrap) {
+    wrap.innerHTML = "";
+    wrap.appendChild(canvas);
+  }
+
+  const { dates, tokens, rank_pcts } = _momHistory;
+  const nDates  = dates.length;
+  const nTokens = tokens.length;
+
+  /* Build per-token current rank_pct for sorting (use last non-null) */
+  const tokenCurrentRank = tokens.map((_, ti) => {
+    for (let di = nDates - 1; di >= 0; di--) {
+      const v = rank_pcts[di][ti];
+      if (v != null) return v;
+    }
+    return 0;
+  });
+
+  /* Sort by current rank_pct descending, cap at MOM_HM_MAX_TOKENS */
+  const order = tokens.map((sym, i) => ({ sym, i, rank: tokenCurrentRank[i] }))
+    .sort((a, b) => b.rank - a.rank)
+    .slice(0, MOM_HM_MAX_TOKENS);
+
+  /* Compute 14-day rolling mean per selected token */
+  const MA_WINDOW = 14;
+  const tokenMA = order.map(({ i }) => {
+    const raw = dates.map((_, di) => rank_pcts[di][i]);
+    return smaArray(raw, MA_WINDOW);
+  });
+
+  /* Canvas sizing */
+  const dpr  = window.devicePixelRatio || 1;
+  const W    = (wrap.clientWidth || 1200);
+  const nVis = order.length;
+  const CELL_W = Math.max(2, (W - MOM_HM_LABEL_W - MOM_HM_RIGHT_P) / nDates);
+  const canH  = MOM_HM_TOP_M + nVis * MOM_HM_CELL_H;
+
+  canvas.style.width  = W + "px";
+  canvas.style.height = canH + "px";
+  canvas.width  = Math.round(W * dpr);
+  canvas.height = Math.round(canH * dpr);
+
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, W, canH);
+
+  /* Date headers — show approx every 30 days */
+  const labelStep = Math.max(1, Math.ceil(60 / CELL_W));
+  ctx.font = "500 8.5px 'JetBrains Mono', monospace";
+  ctx.fillStyle = "#545450";
+  ctx.textAlign = "center";
+  dates.forEach((d, ci) => {
+    if (ci % labelStep === 0) {
+      ctx.fillText(d.slice(5), MOM_HM_LABEL_W + ci * CELL_W + CELL_W / 2, 16);
+    }
+  });
+
+  /* Token rows */
+  const cellGapW = CELL_W > 2 ? 1 : 0;
+  const cellGapH = MOM_HM_CELL_H > 3 ? 1 : 0;
+  order.forEach(({ sym }, ri) => {
+    const y = MOM_HM_TOP_M + ri * MOM_HM_CELL_H;
+    const ma = tokenMA[ri];
+
+    /* Symbol label */
+    ctx.font      = "600 8px 'JetBrains Mono', monospace";
+    ctx.fillStyle = "#000";
+    ctx.textAlign = "right";
+    ctx.fillText(sym, MOM_HM_LABEL_W - 3, y + MOM_HM_CELL_H * 0.75);
+
+    /* Date cells */
+    dates.forEach((_, ci) => {
+      const v = ma[ci];
+      ctx.fillStyle = momRankColor(v);
+      ctx.fillRect(
+        MOM_HM_LABEL_W + ci * CELL_W, y,
+        Math.max(1, CELL_W - cellGapW),
+        Math.max(1, MOM_HM_CELL_H - cellGapH)
+      );
+    });
+
+    if ((ri + 1) % 10 === 0 && MOM_HM_CELL_H >= 3) {
+      ctx.fillStyle = "rgba(0,0,0,0.12)";
+      ctx.fillRect(MOM_HM_LABEL_W, y + MOM_HM_CELL_H - cellGapH, nDates * CELL_W, 1);
+    }
+  });
+
+  /* Store layout for hover */
+  canvas._hmlayout = {
+    LABEL_W: MOM_HM_LABEL_W, TOP_M: MOM_HM_TOP_M,
+    CELL_W, CELL_H: MOM_HM_CELL_H,
+    dates, order, tokenMA,
+    rawRankPcts: rank_pcts,
+    tokens,
+  };
+  _momHeatmapDrawn = true;
+
+  if (!_momHeatmapHoverSetup) {
+    _setupMomHeatmapHover();
+    _momHeatmapHoverSetup = true;
+  }
+}
+
+function _setupMomHeatmapHover() {
+  const canvas  = document.getElementById("mom-heatmap-canvas");
+  const tooltip = document.getElementById("mom-tooltip");
+
+  canvas.addEventListener("mousemove", e => {
+    const layout = canvas._hmlayout;
+    if (!layout) { tooltip.style.display = "none"; return; }
+    const rect = canvas.getBoundingClientRect();
+    const ci   = Math.floor((e.clientX - rect.left - layout.LABEL_W) / layout.CELL_W);
+    const ri   = Math.floor((e.clientY - rect.top  - layout.TOP_M)  / layout.CELL_H);
+    if (ri < 0 || ri >= layout.order.length || ci < 0 || ci >= layout.dates.length) {
+      tooltip.style.display = "none"; return;
+    }
+    const { sym, i: ti } = layout.order[ri];
+    const date = layout.dates[ci];
+    const raw  = layout.rawRankPcts[ci][ti];
+    const ma   = layout.tokenMA[ri][ci];
+    const rawStr = raw  != null ? raw.toFixed(3)  : "—";
+    const maStr  = ma   != null ? ma.toFixed(3)   : "—";
+    tooltip.textContent = `${sym}  ·  ${date}\nrank_pct  ${rawStr}\n14d MA    ${maStr}`;
+    tooltip.style.display = "block";
+    tooltip.style.left = (e.clientX + 14) + "px";
+    tooltip.style.top  = (e.clientY  - 8) + "px";
+  });
+  canvas.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+}
+
+/* ─── View 3: Price + rank_pct chart ─── */
+
+function renderMomentumChart(token) {
+  _momChartToken = token;
+  const priceCanvas = document.getElementById("mom-price-canvas");
+  const rankCanvas  = document.getElementById("mom-rank-canvas");
+  if (!_momPrices || !_momHistory) return;
+
+  const { dates: pDates, tokens: pTokens, prices: pData } = _momPrices;
+  const { dates: hDates, tokens: hTokens, rank_pcts }      = _momHistory;
+
+  const pTi = pTokens.indexOf(token);
+  const hTi = hTokens.indexOf(token);
+
+  /* Merge to common dates from price series (365 days) */
+  const allDates = pDates.slice();
+  const priceVals = allDates.map((_, di) => pTi >= 0 ? pData[di][pTi] : null);
+  const rankRaw   = allDates.map(d => {
+    const hi = hDates.indexOf(d);
+    return (hi >= 0 && hTi >= 0) ? rank_pcts[hi][hTi] : null;
+  });
+  const rankMA = smaArray(rankRaw, 14);
+
+  /* Valid price range for log scale */
+  const validPrices = priceVals.filter(v => v != null && v > 0);
+  if (!validPrices.length) {
+    document.getElementById("mom-chart-price-block").innerHTML =
+      `<div class="placeholder">no price data for ${token}</div>`;
+    return;
+  }
+
+  const dpr = window.devicePixelRatio || 1;
+  const CW  = Math.round((priceCanvas.parentElement.clientWidth || 1200));
+
+  /* Top panel: price (log) */
+  const pH = 280, padL = 60, padR = 24, padT = 14, padB = 12;
+  priceCanvas.style.height  = pH + "px";
+  priceCanvas.width  = Math.round(CW * dpr);
+  priceCanvas.height = Math.round(pH * dpr);
+  {
+    const ctx = priceCanvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#faf8f3";
+    ctx.fillRect(0, 0, CW, pH);
+
+    const pMin = Math.min(...validPrices), pMax = Math.max(...validPrices);
+    const logMin = Math.log(pMin * 0.97), logMax = Math.log(pMax * 1.03);
+    const x0 = padL, x1 = CW - padR, y0 = padT, y1 = pH - padB;
+    const scaleX = (di) => x0 + (di / (allDates.length - 1 || 1)) * (x1 - x0);
+    const scaleYP = (p) => {
+      if (!p || p <= 0) return y1;
+      return y1 - (Math.log(p) - logMin) / (logMax - logMin) * (y1 - y0);
+    };
+
+    /* Grid lines */
+    const span  = pMax / pMin;
+    const step  = span > 8 ? 2 : (span > 3 ? 1.5 : 1.25);
+    const ticks = [];
+    for (let v = Math.pow(step, Math.floor(Math.log(pMin)/Math.log(step))); v <= pMax * 1.01; v *= step) {
+      if (v >= pMin * 0.99) ticks.push(v);
+    }
+    ctx.strokeStyle = "#ebe6d8"; ctx.lineWidth = 0.5;
+    ticks.forEach(t => {
+      const y = scaleYP(t);
+      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+      ctx.font = "9px 'JetBrains Mono',monospace";
+      ctx.fillStyle = "#545450"; ctx.textAlign = "right";
+      const lab = t >= 1e9 ? (t/1e9).toFixed(1)+"B" : t >= 1e6 ? (t/1e6).toFixed(1)+"M" : t >= 1e3 ? (t/1e3).toFixed(0)+"K" : t.toFixed(0);
+      ctx.fillText(lab, x0 - 4, y + 3);
+    });
+
+    /* Price line */
+    const isBTC = token === "BTC";
+    ctx.strokeStyle = isBTC ? "#f7931a" : "#545450";
+    ctx.lineWidth = 1.5; ctx.lineJoin = "round";
+    ctx.beginPath();
+    let started = false;
+    allDates.forEach((_, di) => {
+      const v = priceVals[di];
+      if (!v || v <= 0) { started = false; return; }
+      const x = scaleX(di), y = scaleYP(v);
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    /* Date labels on top panel too */
+    ctx.font = "8.5px 'JetBrains Mono',monospace";
+    ctx.fillStyle = "#8a8780"; ctx.textAlign = "center";
+    const labelStep = Math.max(1, Math.floor(allDates.length / 8));
+    allDates.forEach((d, di) => {
+      if (di % labelStep !== 0) return;
+      ctx.fillText(d.slice(5), scaleX(di), y1 + 10);
+    });
+  }
+
+  /* Bottom panel: rank_pct */
+  const rH = 160;
+  rankCanvas.style.height  = rH + "px";
+  rankCanvas.width  = Math.round(CW * dpr);
+  rankCanvas.height = Math.round(rH * dpr);
+  {
+    const ctx = rankCanvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#faf8f3";
+    ctx.fillRect(0, 0, CW, rH);
+
+    const x0 = padL, x1 = CW - padR, y0 = 8, y1 = rH - 28;
+    const scaleX  = (di) => x0 + (di / (allDates.length - 1 || 1)) * (x1 - x0);
+    const scaleYR = (v)  => y1 - (v / 1.0) * (y1 - y0);
+    const Q5_Y    = scaleYR(0.80);
+
+    /* Grid */
+    ctx.strokeStyle = "#ebe6d8"; ctx.lineWidth = 0.5;
+    [0, 0.25, 0.5, 0.75, 1.0].forEach(v => {
+      const y = scaleYR(v);
+      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+      ctx.font = "9px 'JetBrains Mono',monospace";
+      ctx.fillStyle = "#545450"; ctx.textAlign = "right";
+      ctx.fillText(v.toFixed(2), x0 - 4, y + 3);
+    });
+
+    /* Q5 threshold line */
+    ctx.strokeStyle = "#2e6a3b"; ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(x0, Q5_Y); ctx.lineTo(x1, Q5_Y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = "8.5px 'JetBrains Mono',monospace";
+    ctx.fillStyle = "#2e6a3b"; ctx.textAlign = "left";
+    ctx.fillText("0.80 Q5", x1 + 3, Q5_Y + 3);
+
+    /* Raw rank_pct line (faint) */
+    ctx.strokeStyle = "#c0bbad"; ctx.lineWidth = 0.75; ctx.lineJoin = "round";
+    ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    let started = false;
+    allDates.forEach((_, di) => {
+      const v = rankRaw[di];
+      if (v == null) { started = false; return; }
+      const x = scaleX(di), y = scaleYR(v);
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    /* 14d MA with color above/below Q5 */
+    ctx.lineWidth = 2.0; ctx.lineJoin = "round";
+    started = false;
+    let prevX = null, prevY = null, prevMA = null;
+    allDates.forEach((_, di) => {
+      const v = rankMA[di];
+      if (v == null) { started = false; prevX = null; prevY = null; prevMA = null; return; }
+      const x = scaleX(di), y = scaleYR(v);
+      if (!started) {
+        ctx.beginPath(); ctx.moveTo(x, y);
+        ctx.strokeStyle = v >= 0.80 ? "#2e6a3b" : "#545450";
+        started = true;
+      } else {
+        /* Change color segment-by-segment when crossing 0.80 */
+        const newColor = v >= 0.80 ? "#2e6a3b" : "#545450";
+        const oldColor = prevMA != null && prevMA >= 0.80 ? "#2e6a3b" : "#545450";
+        if (newColor !== oldColor && prevX != null) {
+          ctx.lineTo(x, y); ctx.stroke();
+          ctx.beginPath(); ctx.strokeStyle = newColor; ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      prevX = x; prevY = y; prevMA = v;
+    });
+    if (started) ctx.stroke();
+
+    /* X-axis labels */
+    ctx.font = "8.5px 'JetBrains Mono',monospace";
+    ctx.fillStyle = "#8a8780"; ctx.textAlign = "center";
+    const labelStep = Math.max(1, Math.floor(allDates.length / 8));
+    allDates.forEach((d, di) => {
+      if (di % labelStep !== 0) return;
+      const x = scaleX(di);
+      ctx.beginPath(); ctx.strokeStyle = "#8a8780"; ctx.lineWidth = 0.5;
+      ctx.moveTo(x, y1); ctx.lineTo(x, y1 + 3); ctx.stroke();
+      ctx.fillStyle = "#545450";
+      ctx.fillText(d.slice(5), x, y1 + 13);
+      const yr = d.slice(0, 4);
+      if (d.slice(5) <= "01-15" && d.slice(5) >= "01-01") {
+        ctx.fillStyle = "#0e0e0e"; ctx.font = "bold 8.5px 'JetBrains Mono',monospace";
+        ctx.fillText(yr, x, y1 + 23);
+        ctx.font = "8.5px 'JetBrains Mono',monospace";
+      }
+    });
+  }
+}
+
+/* ─── Toggle wiring ─── */
+
+function setupMomentumToggles() {
+  /* Q5 / All toggle */
+  const q5Toggle = document.getElementById("mom-q5-toggle");
+  q5Toggle.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      _momQ5Only = btn.dataset.q5 === "true";
+      q5Toggle.querySelectorAll("button").forEach(b => b.classList.toggle("active", b === btn));
+      if (_momViewMode === "screener") renderMomentumScreener();
+    });
+  });
+
+  /* View toggle */
+  const viewToggle = document.getElementById("mom-view-toggle");
+  const screenerWrap = document.getElementById("mom-screener-wrap");
+  const heatmapWrap  = document.getElementById("mom-heatmap-wrap");
+  const chartWrap    = document.getElementById("mom-chart-wrap");
+  const tokenSelWrap = document.getElementById("mom-token-select-wrap");
+
+  viewToggle.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      _momViewMode = btn.dataset.view;
+      viewToggle.querySelectorAll("button").forEach(b => b.classList.toggle("active", b === btn));
+
+      screenerWrap.style.display = _momViewMode === "screener" ? "" : "none";
+      heatmapWrap.style.display  = _momViewMode === "heatmap"  ? "" : "none";
+      chartWrap.style.display    = _momViewMode === "chart"    ? "" : "none";
+      tokenSelWrap.style.display = _momViewMode === "chart"    ? "" : "none";
+
+      if (_momViewMode === "heatmap") loadMomentumHistory();
+      if (_momViewMode === "chart")   loadMomentumChart();
+    });
+  });
+
+  /* Token selector */
+  const tokenSel = document.getElementById("mom-token-select");
+  tokenSel.addEventListener("change", () => {
+    _momChartToken = tokenSel.value;
+    renderMomentumChart(_momChartToken);
   });
 }
 
@@ -2845,6 +3748,7 @@ async function refresh() {
 function init() {
   setupTabs();
   setupDivViewToggle();
+  setupMomentumToggles();
   document.getElementById("btn-refresh").addEventListener("click", refresh);
 
   const now = new Date();
