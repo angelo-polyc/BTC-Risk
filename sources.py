@@ -223,6 +223,36 @@ class SourceAPI:
             return []
 
     # ------------------------------------------------------------------ #
+    # Aggregated open interest                                            #
+    # ------------------------------------------------------------------ #
+
+    async def oi_history(self, symbol: str, limit: int = 100) -> list[DayBar]:
+        """Aggregated open interest across all exchanges."""
+        if not self.supports(symbol):
+            return []
+        try:
+            r = await self._get(
+                "/api/futures/open-interest/aggregated-history",
+                {"symbol": symbol, "interval": "1d", "limit": limit},
+            )
+            data = r.get("data") or []
+            out = []
+            for row in data:
+                ts = row.get("time") or row.get("t")
+                if ts and ts > 1e12:
+                    ts /= 1000
+                close = row.get("close")
+                if ts and close is not None:
+                    out.append(DayBar(
+                        date=datetime.fromtimestamp(ts, tz=timezone.utc).date(),
+                        close=float(close),
+                    ))
+            return sorted(out, key=lambda x: x.date)
+        except Exception as e:
+            print(f"[sources] oi {symbol}: {e}")
+            return []
+
+    # ------------------------------------------------------------------ #
     # L/S global account ratio                                            #
     # ------------------------------------------------------------------ #
 

@@ -38,6 +38,8 @@ def compute_scores(
     cvd_buy:   pd.DataFrame,
     cvd_sell:  pd.DataFrame,
     ls_global: pd.DataFrame | None = None,
+    funding:   pd.DataFrame | None = None,
+    oi:        pd.DataFrame | None = None,
 ) -> dict:
     """
     Returns a dict ready to be serialised as scores.json:
@@ -126,18 +128,80 @@ def compute_scores(
     else:
         ls_ext_short_latest = pd.Series(dtype=float)
 
+    # ---- pre-momentum composite (forward-looking screener signal) ----
+    # Five signals: rel_7d_xs_z, cvd_7d_pct, comp_accel_xs_z, ext_short_fund, oi_growth_xs_z
+    # Identifies non-Q5 tokens likely to enter Q5 within 14 days (+16pp lift vs base rate).
+
+    def _xs_z(s: pd.Series) -> pd.Series:
+        mu, sig = s.mean(), s.std()
+        return (s - mu) / sig if sig > 0 else s * 0
+
+    # Signal 1: BTC-relative 7d return, cross-sectional z-score
+    btc_7d_ret = (btc.shift(skip) / btc.shift(skip + 7) - 1)
+    rel_7d     = (prices_c.shift(skip) / prices_c.shift(skip + 7) - 1).sub(btc_7d_ret, axis=0)
+    rel_7d_xs  = _xs_z(rel_7d.loc[latest_date])
+
+    # Signal 2: CVD 7d pct rank (buy pressure)
+    cvd_7d_sum = (buy_c - sell_c).shift(skip).rolling(7, min_periods=4).sum()
+    cvd_7d_pct_s = cvd_7d_sum.rank(axis=1, pct=True, na_option='keep').loc[latest_date]
+    cvd_7d_xs  = _xs_z(cvd_7d_pct_s.dropna())
+
+    # Signal 3: Composite score acceleration (today vs 7 dates ago)
+    valid_idx = composite.dropna(how='all').index
+    if len(valid_idx) >= 8:
+        comp_7d_ago   = composite.loc[valid_idx[-8]]
+        comp_accel    = composite.loc[latest_date] - comp_7d_ago
+        comp_accel_xs = _xs_z(comp_accel.dropna())
+    else:
+        comp_accel_xs = pd.Series(dtype=float)
+
+    # Signal 4: Extreme short funding flag (ts-z < -1.5)
+    if funding is not None and not funding.empty:
+        fund_r     = funding.reindex(index=prices_c.index, columns=prices_c.columns)
+        fund_mean  = fund_r.rolling(60, min_periods=30).mean()
+        fund_std   = fund_r.rolling(60, min_periods=30).std().replace(0, np.nan)
+        fund_tsz_l = ((fund_r - fund_mean) / fund_std).loc[latest_date] if latest_date in fund_r.index else pd.Series(dtype=float)
+        ext_short  = (fund_tsz_l < -1.5).astype(float).where(fund_tsz_l.notna()).fillna(0)
+        ext_short_xs = _xs_z(ext_short)
+    else:
+        ext_short_xs = pd.Series(dtype=float)
+
+    # Signal 5: OI growth 14d, cross-sectional z-score
+    if oi is not None and not oi.empty:
+        oi_r       = oi.reindex(index=prices_c.index, columns=prices_c.columns)
+        oi_growth  = oi_r.shift(skip) / oi_r.shift(skip + 14) - 1
+        oi_growth_l = oi_growth.loc[latest_date] if latest_date in oi_growth.index else pd.Series(dtype=float)
+        oi_xs      = _xs_z(oi_growth_l.dropna())
+    else:
+        oi_xs = pd.Series(dtype=float)
+
+    # Combine — equal-weight, NaN-tolerant (require ≥ 2 of 5)
+    pre_components = [rel_7d_xs, cvd_7d_xs, comp_accel_xs, ext_short_xs, oi_xs]
+    all_syms = prices_c.columns
+    pre_total  = pd.Series(0.0, index=all_syms)
+    pre_nvalid = pd.Series(0,   index=all_syms)
+    for comp in pre_components:
+        comp_r = comp.reindex(all_syms)
+        valid  = comp_r.notna()
+        pre_total  += comp_r.fillna(0)
+        pre_nvalid += valid.astype(int)
+    pre_score = (pre_total / pre_nvalid).where(pre_nvalid >= 2)
+    pre_rank  = pre_score.rank(pct=True, ascending=True, na_option='keep')
+
     scores_list = [
         {
-            "symbol":       sym,
-            "score":        round(float(latest_scores[sym]), 4),
-            "rank_pct":     round(float(latest_ranks[sym]),  4),
-            "res14_z":      round(float(z_res_latest[sym]),  3) if pd.notna(z_res_latest.get(sym)) else None,
-            "raw14_z":      round(float(z_r14_latest[sym]),  3) if pd.notna(z_r14_latest.get(sym)) else None,
-            "raw7_z":       round(float(z_r7_latest[sym]),   3) if pd.notna(z_r7_latest.get(sym))  else None,
-            "cvd_pct":      round(float(p_cvd_latest[sym]),  3) if pd.notna(p_cvd_latest.get(sym)) else None,
-            "ls_ext_short": bool(ls_ext_short_latest[sym] < -1.0)
-                            if sym in ls_ext_short_latest.index and pd.notna(ls_ext_short_latest[sym])
-                            else None,
+            "symbol":           sym,
+            "score":            round(float(latest_scores[sym]), 4),
+            "rank_pct":         round(float(latest_ranks[sym]),  4),
+            "res14_z":          round(float(z_res_latest[sym]),  3) if pd.notna(z_res_latest.get(sym)) else None,
+            "raw14_z":          round(float(z_r14_latest[sym]),  3) if pd.notna(z_r14_latest.get(sym)) else None,
+            "raw7_z":           round(float(z_r7_latest[sym]),   3) if pd.notna(z_r7_latest.get(sym))  else None,
+            "cvd_pct":          round(float(p_cvd_latest[sym]),  3) if pd.notna(p_cvd_latest.get(sym)) else None,
+            "ls_ext_short":     bool(ls_ext_short_latest[sym] < -1.0)
+                                if sym in ls_ext_short_latest.index and pd.notna(ls_ext_short_latest[sym])
+                                else None,
+            "pre_mom_score":    round(float(pre_score[sym]), 4)    if sym in pre_score.index and pd.notna(pre_score.get(sym)) else None,
+            "pre_mom_rank_pct": round(float(pre_rank[sym]),  4)    if sym in pre_rank.index  and pd.notna(pre_rank.get(sym))  else None,
         }
         for sym in latest_scores.index
     ]
@@ -286,10 +350,10 @@ async def load_panels_from_db(
     pool,
     price_days: int = 430,
     cvd_days: int = 385,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Load all five panels from Postgres and return as DataFrames.
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load all six panels from Postgres and return as DataFrames.
 
-    Returns: (prices_df, buy_df, sell_df, fund_df, ls_df)
+    Returns: (prices_df, buy_df, sell_df, fund_df, ls_df, oi_df)
     """
     import db as _db
     prices_raw = await _db.get_raw_panel(pool, "price",       price_days)
@@ -297,14 +361,16 @@ async def load_panels_from_db(
     sell_raw   = await _db.get_raw_panel(pool, "taker_sell",  cvd_days)
     fund_raw   = await _db.get_raw_panel(pool, "funding",     cvd_days)
     ls_raw     = await _db.get_raw_panel(pool, "ls_global",   cvd_days)
+    oi_raw     = await _db.get_raw_panel(pool, "oi",          cvd_days)
 
     prices_df = _panel_to_df(prices_raw)
     buy_df    = _panel_to_df(buy_raw)
     sell_df   = _panel_to_df(sell_raw)
     fund_df   = _panel_to_df(fund_raw)
     ls_df     = _panel_to_df(ls_raw)
+    oi_df     = _panel_to_df(oi_raw)
 
-    return prices_df, buy_df, sell_df, fund_df, ls_df
+    return prices_df, buy_df, sell_df, fund_df, ls_df, oi_df
 
 
 async def write_scores_to_db(pool, scores_dict: dict) -> None:
@@ -324,8 +390,10 @@ async def write_scores_to_db(pool, scores_dict: dict) -> None:
             "res14_z":      s.get("res14_z"),
             "raw14_z":      s.get("raw14_z"),
             "raw7_z":       s.get("raw7_z"),
-            "cvd_pct":      s.get("cvd_pct"),
-            "ls_ext_short": s.get("ls_ext_short"),
+            "cvd_pct":          s.get("cvd_pct"),
+            "ls_ext_short":     s.get("ls_ext_short"),
+            "pre_mom_score":    s.get("pre_mom_score"),
+            "pre_mom_rank_pct": s.get("pre_mom_rank_pct"),
         })
     await _db.upsert_scores_batch(pool, score_rows)
 

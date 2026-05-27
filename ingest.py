@@ -15,7 +15,8 @@ from sources import SourceAPI
 from scorer import compute_scores, load_panels_from_db, write_scores_to_db
 from universe import load_symbols
 
-PULL_DAYS = 5  # how many recent days to pull per ingest run
+PULL_DAYS = 5   # how many recent days to pull per ingest run
+OI_PULL   = 20  # OI needs 14d growth window + skip + buffer
 
 
 async def run_ingest(pool: asyncpg.Pool) -> None:
@@ -33,12 +34,13 @@ async def run_ingest(pool: asyncpg.Pool) -> None:
                 cvd     = await api.cvd_history(sym,       limit=PULL_DAYS)
                 funding = await api.funding_history(sym,   limit=PULL_DAYS)
                 ls      = await api.ls_global_history(sym, limit=PULL_DAYS)
-                return sym, prices, cvd, funding, ls
+                oi      = await api.oi_history(sym,        limit=OI_PULL)
+                return sym, prices, cvd, funding, ls, oi
 
         results = await asyncio.gather(*(pull(s) for s in symbols))
 
     # Upsert each token's data directly into Postgres
-    for sym, prices, cvd, funding, ls in results:
+    for sym, prices, cvd, funding, ls, oi in results:
         if prices:
             points = [{"d": str(r.date), "v": r.close} for r in prices]
             await db.upsert_raw_series(pool, sym, "price", points)
@@ -53,13 +55,16 @@ async def run_ingest(pool: asyncpg.Pool) -> None:
         if ls:
             points = [{"d": str(r.date), "v": r.close} for r in ls]
             await db.upsert_raw_series(pool, sym, "ls_global", points)
+        if oi:
+            points = [{"d": str(r.date), "v": r.close} for r in oi]
+            await db.upsert_raw_series(pool, sym, "oi", points)
 
     print(f"[ingest] upserted raw series for {len(results)} symbols")
 
     # Load panels from DB, recompute scores, persist
     try:
-        prices_df, buy_df, sell_df, fund_df, ls_df = await load_panels_from_db(pool)
-        scores = compute_scores(prices_df, buy_df, sell_df, ls_df)
+        prices_df, buy_df, sell_df, fund_df, ls_df, oi_df = await load_panels_from_db(pool)
+        scores = compute_scores(prices_df, buy_df, sell_df, ls_df, funding=fund_df, oi=oi_df)
         await write_scores_to_db(pool, scores)
         print(f"[ingest] scores written — {scores['n_tokens']} tokens  regime={scores['regime']}")
     except Exception as e:

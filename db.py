@@ -11,7 +11,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "").replace("postgres://", "postgr
 
 PRICE_RETENTION   = 430   # days kept in mom_raw_series for price panel
 HISTORY_RETENTION = 365   # days kept in mom_scores_history
-RAW_PANELS = ["price", "taker_buy", "taker_sell", "funding", "ls_global"]
+RAW_PANELS = ["price", "taker_buy", "taker_sell", "funding", "ls_global", "oi"]
 
 
 # ---------------------------------------------------------------------------
@@ -56,17 +56,22 @@ async def init_db(pool: asyncpg.Pool) -> None:
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS mom_scores (
-                symbol        TEXT PRIMARY KEY,
-                as_of         TEXT NOT NULL,
-                score         REAL,
-                rank_pct      REAL,
-                res14_z       REAL,
-                raw14_z       REAL,
-                raw7_z        REAL,
-                cvd_pct       REAL,
-                ls_ext_short  BOOLEAN
+                symbol            TEXT PRIMARY KEY,
+                as_of             TEXT NOT NULL,
+                score             REAL,
+                rank_pct          REAL,
+                res14_z           REAL,
+                raw14_z           REAL,
+                raw7_z            REAL,
+                cvd_pct           REAL,
+                ls_ext_short      BOOLEAN,
+                pre_mom_score     REAL,
+                pre_mom_rank_pct  REAL
             )
         """)
+        # Migrate existing tables — ADD COLUMN IF NOT EXISTS is idempotent
+        await conn.execute("ALTER TABLE mom_scores ADD COLUMN IF NOT EXISTS pre_mom_score REAL")
+        await conn.execute("ALTER TABLE mom_scores ADD COLUMN IF NOT EXISTS pre_mom_rank_pct REAL")
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS mom_regime (
                 id         INTEGER PRIMARY KEY DEFAULT 1,
@@ -188,28 +193,27 @@ async def upsert_scores_batch(pool: asyncpg.Pool, scores: list[dict]) -> None:
         async with conn.transaction():
             await conn.executemany("""
                 INSERT INTO mom_scores
-                    (symbol, as_of, score, rank_pct, res14_z, raw14_z, raw7_z, cvd_pct, ls_ext_short)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    (symbol, as_of, score, rank_pct, res14_z, raw14_z, raw7_z,
+                     cvd_pct, ls_ext_short, pre_mom_score, pre_mom_rank_pct)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 ON CONFLICT (symbol) DO UPDATE SET
-                    as_of        = EXCLUDED.as_of,
-                    score        = EXCLUDED.score,
-                    rank_pct     = EXCLUDED.rank_pct,
-                    res14_z      = EXCLUDED.res14_z,
-                    raw14_z      = EXCLUDED.raw14_z,
-                    raw7_z       = EXCLUDED.raw7_z,
-                    cvd_pct      = EXCLUDED.cvd_pct,
-                    ls_ext_short = EXCLUDED.ls_ext_short
+                    as_of             = EXCLUDED.as_of,
+                    score             = EXCLUDED.score,
+                    rank_pct          = EXCLUDED.rank_pct,
+                    res14_z           = EXCLUDED.res14_z,
+                    raw14_z           = EXCLUDED.raw14_z,
+                    raw7_z            = EXCLUDED.raw7_z,
+                    cvd_pct           = EXCLUDED.cvd_pct,
+                    ls_ext_short      = EXCLUDED.ls_ext_short,
+                    pre_mom_score     = EXCLUDED.pre_mom_score,
+                    pre_mom_rank_pct  = EXCLUDED.pre_mom_rank_pct
             """, [
                 (
-                    s["symbol"],
-                    s["as_of"],
-                    s.get("score"),
-                    s.get("rank_pct"),
-                    s.get("res14_z"),
-                    s.get("raw14_z"),
-                    s.get("raw7_z"),
-                    s.get("cvd_pct"),
-                    s.get("ls_ext_short"),
+                    s["symbol"], s["as_of"],
+                    s.get("score"), s.get("rank_pct"),
+                    s.get("res14_z"), s.get("raw14_z"), s.get("raw7_z"),
+                    s.get("cvd_pct"), s.get("ls_ext_short"),
+                    s.get("pre_mom_score"), s.get("pre_mom_rank_pct"),
                 )
                 for s in scores
             ])
@@ -220,7 +224,7 @@ async def get_all_scores(pool: asyncpg.Pool) -> tuple[list[dict], dict]:
     async with pool.acquire() as conn:
         score_rows = await conn.fetch("""
             SELECT symbol, as_of, score, rank_pct, res14_z, raw14_z, raw7_z,
-                   cvd_pct, ls_ext_short
+                   cvd_pct, ls_ext_short, pre_mom_score, pre_mom_rank_pct
             FROM mom_scores
             ORDER BY rank_pct DESC NULLS LAST
         """)

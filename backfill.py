@@ -26,6 +26,7 @@ PRICE_DAYS = 430   # 365d scores + 62d warmup (60d rolling beta + 2-day skip)
 CVD_DAYS   = 385   # 365d + 16d warmup + buffer
 FUND_DAYS  = 385
 LS_DAYS    = 385   # 365d + 20d warmup for 60d ts-z (fills in over time)
+OI_DAYS    = 385   # 365d + 14d warmup for oi_growth_14d computation
 
 _HERE  = Path(__file__).parent
 CG_IDS = json.loads((_HERE / "cg_ids.json").read_text())
@@ -53,9 +54,10 @@ async def main(pool: asyncpg.Pool) -> None:
                 cvd     = await api.cvd_history(sym,       limit=CVD_DAYS)
                 funding = await api.funding_history(sym,   limit=FUND_DAYS)
                 ls      = await api.ls_global_history(sym, limit=LS_DAYS)
+                oi      = await api.oi_history(sym,        limit=OI_DAYS)
 
                 src = "cg" if prices and prices[0].close > 0 else "cglass"
-                print(f"[backfill] [{i}/{len(symbols)}] {sym}: price={len(prices)}({src}) cvd={len(cvd)} funding={len(funding)} ls={len(ls)}")
+                print(f"[backfill] [{i}/{len(symbols)}] {sym}: price={len(prices)}({src}) cvd={len(cvd)} funding={len(funding)} ls={len(ls)} oi={len(oi)}")
 
                 # Upsert immediately after each token pull
                 if prices:
@@ -72,16 +74,19 @@ async def main(pool: asyncpg.Pool) -> None:
                 if ls:
                     points = [{"d": str(r.date), "v": r.close} for r in ls]
                     await db.upsert_raw_series(pool, sym, "ls_global", points)
+                if oi:
+                    points = [{"d": str(r.date), "v": r.close} for r in oi]
+                    await db.upsert_raw_series(pool, sym, "oi", points)
 
             except Exception as e:
                 print(f"[backfill] [{i}/{len(symbols)}] {sym}: error — {e}")
 
     # Score
     try:
-        prices_df, buy_df, sell_df, fund_df, ls_df = await load_panels_from_db(pool)
+        prices_df, buy_df, sell_df, fund_df, ls_df, oi_df = await load_panels_from_db(pool)
 
         # Today's scores
-        scores = compute_scores(prices_df, buy_df, sell_df, ls_df)
+        scores = compute_scores(prices_df, buy_df, sell_df, ls_df, funding=fund_df, oi=oi_df)
         await write_scores_to_db(pool, scores)
 
         # Seed full 1-year rank_pct history from the loaded panels
