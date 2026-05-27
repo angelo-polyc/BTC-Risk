@@ -31,16 +31,32 @@ def get_pool() -> asyncpg.Pool:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _pool
-    _pool = await db.create_pool()
-    await db.init_db(_pool)
+    db_url = db.DATABASE_URL
+    masked = db_url[:30] + "..." if len(db_url) > 30 else db_url or "(empty)"
+    print(f"[startup] connecting to DB: {masked}")
+    try:
+        _pool = await db.create_pool()
+        await db.init_db(_pool)
+        print("[startup] DB ready")
+    except Exception as e:
+        print(f"[startup] DB connection FAILED: {e}")
+        _pool = None
 
-    scheduler.add_job(lambda: asyncio.create_task(run_ingest(_pool)), CronTrigger(hour=6,  minute=0), id="ny_morning")
-    scheduler.add_job(lambda: asyncio.create_task(run_ingest(_pool)), CronTrigger(hour=18, minute=0), id="ny_evening")
+    scheduler.add_job(lambda: asyncio.create_task(_safe_ingest()), CronTrigger(hour=6,  minute=0), id="ny_morning")
+    scheduler.add_job(lambda: asyncio.create_task(_safe_ingest()), CronTrigger(hour=18, minute=0), id="ny_evening")
     scheduler.start()
-    print("[startup] pool ready, scheduler started")
+    print("[startup] scheduler started")
     yield
     scheduler.shutdown()
-    await _pool.close()
+    if _pool:
+        await _pool.close()
+
+
+async def _safe_ingest():
+    if _pool is None:
+        print("[ingest] skipped — no DB pool")
+        return
+    await run_ingest(_pool)
 
 
 app = FastAPI(lifespan=lifespan)

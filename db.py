@@ -22,7 +22,11 @@ ZSCORE_METRICS = [
 # ---------------------------------------------------------------------------
 
 async def create_pool() -> asyncpg.Pool:
-    return await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+    try:
+        return await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+    except Exception:
+        # Retry with SSL — needed when using Railway's external URL
+        return await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10, ssl="require")
 
 
 # ---------------------------------------------------------------------------
