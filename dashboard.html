@@ -1163,7 +1163,7 @@
   <div id="mom-chart-wrap" style="display:none">
     <div id="mom-chart-loading" class="placeholder" style="display:none">loading price &amp; history data…</div>
     <div id="mom-chart-price-block" class="chart-block">
-      <div class="mom-chart-label">Price (log scale)</div>
+      <div class="mom-chart-label">Return % (from series start)</div>
       <canvas id="mom-price-canvas" style="display:block;width:100%"></canvas>
     </div>
     <div class="mom-chart-divider"></div>
@@ -3596,9 +3596,15 @@ function renderMomentumChart() {
     return { sym, color, priceVals, rankRaw, rankMA };
   });
 
-  /* Global price bounds across all visible tokens */
-  const allPriceVals = tokenSeries.flatMap(s => s.priceVals.filter(v => v != null && v > 0));
-  if (!allPriceVals.length) {
+  /* Convert each token's price series to % return from its first available price */
+  tokenSeries.forEach(s => {
+    const baseIdx = s.priceVals.findIndex(v => v != null && v > 0);
+    const base    = baseIdx >= 0 ? s.priceVals[baseIdx] : null;
+    s.retVals = base ? s.priceVals.map(v => v != null ? (v / base - 1) * 100 : null) : s.priceVals.map(() => null);
+  });
+
+  const allRetVals = tokenSeries.flatMap(s => s.retVals.filter(v => v != null));
+  if (!allRetVals.length) {
     document.getElementById("mom-chart-price-block").innerHTML =
       `<div class="placeholder">no price data for selected tokens</div>`;
     return;
@@ -3606,12 +3612,14 @@ function renderMomentumChart() {
 
   const dpr = window.devicePixelRatio || 1;
   const CW  = Math.max(300, priceCanvas.parentElement.getBoundingClientRect().width || 1200);
-  const padL = 62, padR = 24, padT = 14, padB = 18;
+  const padL = 58, padR = 24, padT = 14, padB = 18;
 
-  /* ── TOP PANEL: price (log scale) ── */
-  const pMin = Math.min(...allPriceVals);
-  const pMax = Math.max(...allPriceVals);
-  const logMin = Math.log(pMin * 0.95), logMax = Math.log(pMax * 1.05);
+  /* ── TOP PANEL: % return from start ── */
+  const rMin = Math.min(...allRetVals);
+  const rMax = Math.max(...allRetVals);
+  const pad  = Math.max(2, (rMax - rMin) * 0.06);
+  const yLo  = rMin - pad, yHi = rMax + pad;
+
   const pH = 280;
   priceCanvas.style.height = pH + "px";
   priceCanvas.width  = Math.round(CW * dpr);
@@ -3623,36 +3631,44 @@ function renderMomentumChart() {
   pCtx.fillRect(0, 0, CW, pH);
 
   const x0 = padL, x1 = CW - padR, y0 = padT, y1 = pH - padB;
-  const scaleX  = di => x0 + (di / (nDates - 1 || 1)) * (x1 - x0);
-  const scaleYP = p  => (p > 0) ? y1 - (Math.log(p) - logMin) / (logMax - logMin) * (y1 - y0) : y1;
+  const scaleX  = di  => x0 + (di / (nDates - 1 || 1)) * (x1 - x0);
+  const scaleYP = ret => y1 - ((ret - yLo) / (yHi - yLo)) * (y1 - y0);
 
-  /* Y-axis ticks */
-  const magnitude = Math.pow(10, Math.floor(Math.log10(pMin)));
-  const candidates = [1, 2, 2.5, 5, 10].map(m => m * magnitude);
-  let tickStep = candidates.find(s => (pMax - pMin) / s >= 3 && (pMax - pMin) / s <= 8) || magnitude;
+  /* Y-axis: round % ticks */
+  const span = yHi - yLo;
+  const rawStep = span / 5;
+  const mag  = Math.pow(10, Math.floor(Math.log10(Math.abs(rawStep) || 1)));
+  const niceSteps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500];
+  const tickStep = niceSteps.find(s => s * mag >= rawStep * 0.8) * mag || mag;
   const ticks = [];
-  const tickStart = Math.ceil(pMin / tickStep) * tickStep;
-  for (let t = tickStart; t <= pMax * 1.001; t += tickStep) {
-    if (t > 0 && t >= pMin * 0.99) ticks.push(t);
-  }
+  for (let t = Math.ceil(yLo / tickStep) * tickStep; t <= yHi + 0.001; t += tickStep) ticks.push(+t.toFixed(6));
+
   pCtx.strokeStyle = "#ebe6d8"; pCtx.lineWidth = 0.5;
   ticks.forEach(t => {
     const y = scaleYP(t);
     pCtx.beginPath(); pCtx.moveTo(x0, y); pCtx.lineTo(x1, y); pCtx.stroke();
-    const lab = t <= 0 ? "0" : t >= 1e9 ? (t/1e9).toFixed(1)+"B" : t >= 1e6 ? (t/1e6).toFixed(1)+"M" : t >= 1e3 ? (t/1e3).toFixed(0)+"K" : t.toFixed(2);
+    const lab = (t >= 0 ? "+" : "") + t.toFixed(t % 1 === 0 ? 0 : 1) + "%";
     pCtx.font = "9px 'JetBrains Mono',monospace";
-    pCtx.fillStyle = "#545450"; pCtx.textAlign = "right";
+    pCtx.fillStyle = t === 0 ? "#0e0e0e" : "#545450";
+    pCtx.textAlign = "right";
     pCtx.fillText(lab, x0 - 4, y + 3);
   });
 
-  /* Price lines — one per token */
-  tokenSeries.forEach(({ priceVals, color }) => {
+  /* Zero baseline */
+  const zeroY = scaleYP(0);
+  if (zeroY >= y0 && zeroY <= y1) {
+    pCtx.strokeStyle = "#8a8780"; pCtx.lineWidth = 0.75;
+    pCtx.beginPath(); pCtx.moveTo(x0, zeroY); pCtx.lineTo(x1, zeroY); pCtx.stroke();
+  }
+
+  /* Return lines — one per token */
+  tokenSeries.forEach(({ retVals, color }) => {
     pCtx.strokeStyle = color; pCtx.lineWidth = 1.5; pCtx.lineJoin = "round";
     pCtx.beginPath();
     let started = false;
     allDates.forEach((_, di) => {
-      const v = priceVals[di];
-      if (!v || v <= 0) { started = false; return; }
+      const v = retVals[di];
+      if (v == null) { started = false; return; }
       const x = scaleX(di), y = scaleYP(v);
       if (!started) { pCtx.moveTo(x, y); started = true; }
       else pCtx.lineTo(x, y);
