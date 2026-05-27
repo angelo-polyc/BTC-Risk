@@ -107,19 +107,15 @@ def get_history(from_date: str | None = None, to_date: str | None = None,
                 variant: str = "wf365") -> list[dict[str, Any]]:
     if variant not in VARIANTS:
         raise ValueError(f"variant must be one of {VARIANTS}, got {variant!r}")
-    sql    = "SELECT date, data FROM model_daily WHERE variant=%s"
+    # Merge date into JSONB in SQL — avoids Python-level row construction loop.
+    sql    = "SELECT jsonb_set(data, '{date}', to_jsonb(date)) AS row FROM model_daily WHERE variant=%s"
     params: list = [variant]
     if from_date:
         sql += " AND date >= %s"; params.append(from_date)
     if to_date:
         sql += " AND date <= %s"; params.append(to_date)
     sql += " ORDER BY date"
-    out = []
-    for r in _query(sql, params):
-        row = {"date": r["date"]}
-        row.update(_parse_jsonb(r["data"]))
-        out.append(_clean_row(row))
-    return out
+    return [r["row"] for r in _query(sql, params)]
 
 
 # ---------------------------------------------------------------------------
@@ -134,19 +130,14 @@ def get_hypothesis(name: str, from_date: str | None = None,
                    to_date: str | None = None) -> list[dict[str, Any]]:
     if name not in HYPOTHESES:
         raise ValueError(f"hypothesis must be one of {HYPOTHESES}, got {name!r}")
-    sql    = "SELECT date, data FROM model_hypothesis WHERE name=%s"
+    sql    = "SELECT jsonb_set(data, '{date}', to_jsonb(date)) AS row FROM model_hypothesis WHERE name=%s"
     params: list = [name]
     if from_date:
         sql += " AND date >= %s"; params.append(from_date)
     if to_date:
         sql += " AND date <= %s"; params.append(to_date)
     sql += " ORDER BY date"
-    out = []
-    for r in _query(sql, params):
-        row = {"date": r["date"]}
-        row.update(_parse_jsonb(r["data"]))
-        out.append(_clean_row(row))
-    return out
+    return [r["row"] for r in _query(sql, params)]
 
 
 # ---------------------------------------------------------------------------
@@ -167,19 +158,14 @@ def get_weight_history(variant: str = "wf365", label: str = "y_60",
         raise ValueError(f"variant must be one of {VARIANTS}, got {variant!r}")
     if label not in LABELS:
         raise ValueError(f"label must be one of {LABELS}, got {label!r}")
-    sql    = "SELECT fit_date, data FROM model_weight_history WHERE variant=%s AND label=%s"
+    sql    = "SELECT jsonb_set(data, '{fit_date}', to_jsonb(fit_date)) AS row FROM model_weight_history WHERE variant=%s AND label=%s"
     params: list = [variant, label]
     if from_date:
         sql += " AND fit_date >= %s"; params.append(from_date)
     if to_date:
         sql += " AND fit_date <= %s"; params.append(to_date)
     sql += " ORDER BY fit_date"
-    out = []
-    for r in _query(sql, params):
-        row = {"fit_date": r["fit_date"]}
-        row.update(_parse_jsonb(r["data"]))
-        out.append(_clean_row(row))
-    return out
+    return [r["row"] for r in _query(sql, params)]
 
 
 # ---------------------------------------------------------------------------
@@ -202,19 +188,14 @@ def get_health_flags() -> list[dict[str, Any]]:
 def get_health_history(from_date: str | None = None,
                        to_date: str | None = None,
                        extended: bool = False) -> list[dict[str, Any]]:
-    sql    = "SELECT replay_date, data FROM model_health_history WHERE extended=%s"
+    sql    = "SELECT jsonb_set(data, '{replay_date}', to_jsonb(replay_date)) AS row FROM model_health_history WHERE extended=%s"
     params: list = [extended]
     if from_date:
         sql += " AND replay_date >= %s"; params.append(from_date)
     if to_date:
         sql += " AND replay_date <= %s"; params.append(to_date)
     sql += " ORDER BY replay_date"
-    out = []
-    for r in _query(sql, params):
-        row = {"replay_date": r["replay_date"]}
-        row.update(_parse_jsonb(r["data"]))
-        out.append(_clean_row(row))
-    return out
+    return [r["row"] for r in _query(sql, params)]
 
 
 # ---------------------------------------------------------------------------
@@ -223,19 +204,15 @@ def get_health_history(from_date: str | None = None,
 
 def get_shadow_state(from_date: str | None = None,
                      to_date: str | None = None) -> list[dict[str, Any]]:
-    conditions, params = [], []
+    conditions: list[str] = []
+    params: list = []
     if from_date:
         conditions.append("date >= %s"); params.append(from_date)
     if to_date:
         conditions.append("date <= %s"); params.append(to_date)
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-    sql = f"SELECT date, data FROM model_shadow {where} ORDER BY date"
-    out = []
-    for r in _query(sql, params or None):
-        row = {"date": r["date"]}
-        row.update(_parse_jsonb(r["data"]))
-        out.append(_clean_row(row))
-    return out
+    sql = f"SELECT jsonb_set(data, '{{date}}', to_jsonb(date)) AS row FROM model_shadow {where} ORDER BY date"
+    return [r["row"] for r in _query(sql, params or None)]
 
 
 # ---------------------------------------------------------------------------

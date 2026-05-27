@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.security import (
     HTTPAuthorizationCredentials,
@@ -116,6 +117,7 @@ app = FastAPI(
     version="1.0",
     lifespan=_lifespan,
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 # ─── Model state ──────────────────────────────────────────────────────────────
