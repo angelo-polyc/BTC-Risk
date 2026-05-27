@@ -295,6 +295,21 @@ def status_endpoint() -> dict[str, Any]:
     return da.get_status()
 
 
+@app.post("/db_write", dependencies=[Depends(require_token)])
+def db_write() -> dict[str, Any]:
+    """Manually trigger db_writer.py — runs synchronously, returns stdout."""
+    import subprocess, sys
+    result = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "db_writer.py")],
+        capture_output=True, text=True, timeout=180,
+    )
+    return {
+        "returncode": result.returncode,
+        "stdout": result.stdout[-3000:] if result.stdout else "",
+        "stderr": result.stderr[-1000:] if result.stderr else "",
+    }
+
+
 # ─── Browser dashboard ────────────────────────────────────────────────────────
 #
 # Serves dashboard.html from disk, substituting the bearer token into the
