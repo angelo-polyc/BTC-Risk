@@ -738,16 +738,7 @@
     color: var(--ink);
   }
   table.mom-table tr:last-child td { border-bottom: 1px solid var(--ink); }
-  table.mom-table tr.mom-bear-filtered td {
-    opacity: 0.40;
-  }
-  table.mom-table tr.mom-bear-filtered td:first-child::after {
-    content: " [bear filter]";
-    font-size: 9px;
-    color: var(--ink-softer);
-    font-weight: 400;
-    letter-spacing: 0.02em;
-  }
+  /* bear-filtered rows no longer greyed — signal shown via RAW↓ flag instead */
 
   /* Rank bar */
   .mom-rank-bar {
@@ -830,8 +821,26 @@
     margin-right: 4px;
     line-height: 1.4;
   }
-  .mom-flag.cvd-warn { border-color: var(--bear); color: var(--bear); }
-  .mom-flag.ls-ext   { border-color: var(--bear); color: var(--bear); background: rgba(181,56,31,0.06); }
+  .mom-flag.cvd-warn  { border-color: var(--bear); color: var(--bear); }
+  .mom-flag.ls-ext    { border-color: var(--bear); color: var(--bear); background: rgba(181,56,31,0.06); }
+  .mom-flag.raw-down  { border-color: var(--ink-softer); color: var(--ink-softer); }
+  .mom-flag[data-tooltip] { cursor: default; }
+
+  /* Flag tooltip */
+  #mom-flag-tooltip {
+    position: fixed;
+    display: none;
+    background: var(--ink);
+    color: var(--bg);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 11.5px;
+    line-height: 1.5;
+    padding: 8px 12px;
+    max-width: 280px;
+    pointer-events: none;
+    z-index: 999;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  }
 
   /* Heatmap wrap */
   #mom-heatmap-wrap {
@@ -1169,6 +1178,7 @@
 
 <div id="div-tooltip"></div>
 <div id="mom-tooltip"></div>
+<div id="mom-flag-tooltip"></div>
 
 <script>
 /* ============================================================
@@ -3347,8 +3357,7 @@ function renderMomentumScreener() {
   }
 
   const tableRows = rows.map(r => {
-    /* Bear filter: gate off AND raw14_z < 0 */
-    const filtered = bearMode && r.raw14_z != null && r.raw14_z < 0;
+    const rawDown  = bearMode && r.raw14_z != null && r.raw14_z < 0;
     const rankPct  = r.rank_pct != null ? r.rank_pct : 0;
     const rankFill = rankPct >= 0.80 ? "var(--bull)" : "var(--ink-softer)";
 
@@ -3368,13 +3377,16 @@ function renderMomentumScreener() {
 
     let flagsHtml = "";
     if (r.cvd_pct != null && r.cvd_pct < 0.5) {
-      flagsHtml += `<span class="mom-flag cvd-warn">CVD↓</span>`;
+      flagsHtml += `<span class="mom-flag cvd-warn" data-tooltip="Net taker sell pressure over the past 7 days. This name sits below the Q5 median CVD — distribution risk. Informed sellers may be using momentum to exit. Consider reduced sizing.">CVD↓</span>`;
     }
     if (r.ls_ext_short === true) {
-      flagsHtml += `<span class="mom-flag ls-ext">⚡</span>`;
+      flagsHtml += `<span class="mom-flag ls-ext" data-tooltip="Crowded short positioning relative to own 60-day history. When shorts are extreme in a high-momentum name, a squeeze can amplify the move. Low-confidence annotation — use as context, not a signal.">⚡</span>`;
+    }
+    if (rawDown) {
+      flagsHtml += `<span class="mom-flag raw-down" data-tooltip="Raw 14-day return is below the universe average in a bear regime. This name's composite score reflects relative resilience, not absolute strength — it may still be declining in USD terms. Lower conviction in bear.">RAW↓</span>`;
     }
 
-    return `<tr class="${filtered ? "mom-bear-filtered" : ""}">
+    return `<tr>
       <td>${r.symbol}</td>
       <td>${rankBarHtml}</td>
       <td>${compHtml}</td>
@@ -3742,6 +3754,27 @@ function renderMomentumChart() {
 
 /* ─── Toggle wiring ─── */
 
+function setupFlagTooltips() {
+  const tip = document.getElementById("mom-flag-tooltip");
+  document.addEventListener("mouseover", e => {
+    const flag = e.target.closest("[data-tooltip]");
+    if (!flag) return;
+    tip.textContent = flag.dataset.tooltip;
+    tip.style.display = "block";
+  });
+  document.addEventListener("mousemove", e => {
+    if (tip.style.display !== "block") return;
+    const x = e.clientX + 14, y = e.clientY + 14;
+    const over = x + 290 > window.innerWidth;
+    tip.style.left  = (over ? e.clientX - 290 - 4 : x) + "px";
+    tip.style.top   = y + "px";
+  });
+  document.addEventListener("mouseout", e => {
+    if (!e.target.closest("[data-tooltip]")) return;
+    tip.style.display = "none";
+  });
+}
+
 function setupMomentumToggles() {
   /* Q5 / All toggle */
   const q5Toggle = document.getElementById("mom-q5-toggle");
@@ -3818,6 +3851,7 @@ function init() {
   setupTabs();
   setupDivViewToggle();
   setupMomentumToggles();
+  setupFlagTooltips();
   document.getElementById("btn-refresh").addEventListener("click", refresh);
 
   const now = new Date();
