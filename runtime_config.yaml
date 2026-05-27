@@ -23,7 +23,7 @@ log_retention_days: 14
 # If true, runs the sequence once immediately on startup (in addition to
 # every scheduled tick). Useful on a fresh deploy so the API has data
 # before the first cron fire.
-run_on_startup: true
+run_on_startup: false
 
 # The daily sequence, in order. Each step runs as a subprocess in
 # project_dir. Non-zero exit from any step aborts the chain; the next
