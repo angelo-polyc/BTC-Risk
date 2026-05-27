@@ -34,7 +34,7 @@ async def main() -> None:
     async with SourceAPI() as api:
         await api.warm_supported()
 
-        sem = asyncio.Semaphore(4)
+        sem = asyncio.Semaphore(2)  # reduced from 4; each token makes 4 CG API calls, 4×4=16 concurrent was hitting rate limits
 
         async def pull(sym: str):
             async with sem:
