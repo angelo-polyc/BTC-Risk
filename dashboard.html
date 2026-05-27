@@ -859,10 +859,8 @@
     box-shadow: 0 2px 8px rgba(0,0,0,0.25);
   }
 
-  /* Chart view */
-  #mom-chart-wrap {
-    display: none;
-  }
+  /* Chart view — initial display:none is set via inline style on the element;
+     no CSS rule here so the JS toggle (style.display="block") works correctly. */
   .mom-chart-panel {
     position: relative;
   }
@@ -3181,9 +3179,9 @@ async function loadMomentumScores(force = false) {
 }
 
 async function loadMomentumHistory() {
-  const metaEl = document.getElementById("mom-meta");
   if (_momHistory) { renderMomentumHeatmap(); return; }
-  metaEl.textContent = metaEl.textContent + " · loading history…";
+  const metaEl = document.getElementById("mom-meta");
+  if (_momViewMode === "heatmap") metaEl.textContent = metaEl.textContent + " · loading history…";
   try {
     _momHistory = await fetchWithTimeout(MOM_HISTORY_URL);
     _momHeatmapDrawn = false;
@@ -3707,7 +3705,7 @@ function setupMomentumToggles() {
 
       screenerWrap.style.display = _momViewMode === "screener" ? "" : "none";
       heatmapWrap.style.display  = _momViewMode === "heatmap"  ? "" : "none";
-      chartWrap.style.display    = _momViewMode === "chart"    ? "" : "none";
+      chartWrap.style.display    = _momViewMode === "chart"    ? "block" : "none";
       tokenSelWrap.style.display = _momViewMode === "chart"    ? "" : "none";
 
       if (_momViewMode === "heatmap") loadMomentumHistory();
