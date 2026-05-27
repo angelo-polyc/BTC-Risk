@@ -3,36 +3,43 @@ import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 
+import asyncpg
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+import db
 from ingest import run_ingest
-from backfill import main as run_backfill
-from scorer import load_history
+from backfill import main as run_backfill_main
+from sources import _CG_ID_MAP as CG_IDS
 
-DATA_DIR  = Path(os.environ.get("DATA_DIR", "/data"))
-SCORES    = DATA_DIR / "scores.json"
-API_KEY   = os.environ.get("READ_API_KEY")
+API_KEY = os.environ.get("READ_API_KEY")
 
 scheduler = AsyncIOScheduler(timezone="America/New_York")
-_pipeline_lock = asyncio.Lock()  # prevents backfill and ingest from running simultaneously
+
+_pool: asyncpg.Pool | None = None
+
+
+def get_pool() -> asyncpg.Pool:
+    if _pool is None:
+        raise RuntimeError("DB pool not initialised")
+    return _pool
 
 
 async def _safe_ingest():
-    if _pipeline_lock.locked():
-        print("[app] ingest skipped — pipeline already running")
+    if _pool is None:
+        print("[ingest] skipped — no DB pool")
         return
-    async with _pipeline_lock:
-        await run_ingest()
+    await run_ingest(_pool)
 
 
 async def _safe_backfill():
-    async with _pipeline_lock:
-        await run_backfill()
+    if _pool is None:
+        print("[backfill] skipped — no DB pool")
+        return
+    await run_backfill_main(_pool)
 
 
 def _auth(key: str | None) -> None:
@@ -42,13 +49,26 @@ def _auth(key: str | None) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    scheduler.add_job(_safe_ingest, CronTrigger(hour=6,  minute=0),  id="ny_morning")
-    scheduler.add_job(_safe_ingest, CronTrigger(hour=18, minute=0),  id="ny_evening")
+    global _pool
+    db_url = db.DATABASE_URL
+    masked = db_url[:30] + "..." if len(db_url) > 30 else db_url or "(empty)"
+    print(f"[startup] connecting to DB: {masked}")
+    try:
+        _pool = await db.create_pool()
+        await db.init_db(_pool)
+        print("[startup] DB ready")
+    except Exception as e:
+        print(f"[startup] DB connection FAILED: {e}")
+        _pool = None
+
+    scheduler.add_job(_safe_ingest, CronTrigger(hour=6,  minute=0), id="ny_morning")
+    scheduler.add_job(_safe_ingest, CronTrigger(hour=18, minute=0), id="ny_evening")
     scheduler.start()
     print("[startup] scheduler started:", [j.id for j in scheduler.get_jobs()])
     yield
     scheduler.shutdown()
+    if _pool:
+        await _pool.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -62,31 +82,44 @@ async def healthz():
 @app.get("/scores")
 async def scores(x_api_key: str | None = None):
     _auth(x_api_key)
-    if not SCORES.exists():
+    if _pool is None:
+        raise HTTPException(status_code=503, detail="no DB pool")
+    scores_list, regime = await db.get_all_scores(_pool)
+    if not regime:
         raise HTTPException(status_code=503, detail="no data yet — run POST /backfill")
-    return JSONResponse(content=json.loads(SCORES.read_text()))
+    return JSONResponse({
+        "as_of":     regime["as_of"],
+        "regime":    regime["regime"],
+        "gate_on":   regime["gate_on"],
+        "btc_price": regime["btc_price"],
+        "btc_ma200": regime["btc_ma200"],
+        "n_tokens":  len(scores_list),
+        "scores":    scores_list,
+    })
 
 
 @app.get("/status")
 async def status(x_api_key: str | None = None):
     _auth(x_api_key)
-    if not SCORES.exists():
+    if _pool is None:
+        return {"status": "no_db"}
+    regime = await db.get_regime(_pool)
+    if not regime:
         return {"status": "no_data"}
-    data = json.loads(SCORES.read_text())
     return {
-        "as_of":     data.get("as_of"),
-        "regime":    data.get("regime"),
-        "gate_on":   data.get("gate_on"),
-        "btc_price": data.get("btc_price"),
-        "btc_ma200": data.get("btc_ma200"),
-        "n_tokens":  data.get("n_tokens"),
+        "as_of":     regime.get("as_of"),
+        "regime":    regime.get("regime"),
+        "gate_on":   regime.get("gate_on"),
+        "btc_price": regime.get("btc_price"),
+        "btc_ma200": regime.get("btc_ma200"),
+        "n_tokens":  regime.get("n_tokens"),
     }
 
 
 @app.post("/ingest")
 async def manual_ingest(x_api_key: str | None = None):
     _auth(x_api_key)
-    asyncio.create_task(run_ingest())
+    asyncio.create_task(_safe_ingest())
     return {"status": "started"}
 
 
@@ -94,15 +127,12 @@ async def manual_ingest(x_api_key: str | None = None):
 async def scores_history(x_api_key: str | None = None, days: int = 90):
     """Rolling rank_pct history. Returns dates × tokens matrix."""
     _auth(x_api_key)
-    hist = load_history(DATA_DIR, days=min(days, 365))
-    if hist is None or hist.empty:
+    if _pool is None:
+        raise HTTPException(status_code=503, detail="no DB pool")
+    hist = await db.get_scores_history(_pool, days=min(days, 365))
+    if not hist["dates"]:
         raise HTTPException(status_code=503, detail="no history yet — run POST /backfill")
-    return {
-        "dates":     [str(d.date()) for d in hist.index],
-        "tokens":    list(hist.columns),
-        "rank_pcts": [[round(v, 4) if v == v else None for v in row]
-                      for row in hist.values.tolist()],
-    }
+    return hist
 
 
 @app.post("/backfill")
@@ -114,34 +144,58 @@ async def manual_backfill(x_api_key: str | None = None):
 
 @app.get("/prices")
 async def prices(x_api_key: str | None = None, days: int = 430):
-    """Return spot_prices parquet as JSON for downstream analysis."""
+    """Return price panel from DB as JSON for downstream analysis."""
     _auth(x_api_key)
-    import pandas as pd
-    p = DATA_DIR / "spot_prices.parquet"
-    if not p.exists():
+    if _pool is None:
+        raise HTTPException(status_code=503, detail="no DB pool")
+    data = await db.get_raw_panel(_pool, "price", days)
+    if not data:
         raise HTTPException(status_code=503, detail="no price data")
-    df = pd.read_parquet(p).tail(days)
+
+    # Collect all dates across all tokens, sort, then build matrix
+    all_dates: set[str] = set()
+    for points in data.values():
+        for p in points:
+            all_dates.add(p["d"])
+    date_list = sorted(all_dates)
+    tokens    = sorted(data.keys())
+
+    # Build lookup: {(symbol, date): value}
+    lookup: dict[tuple[str, str], float] = {}
+    for sym, points in data.items():
+        for p in points:
+            lookup[(sym, p["d"])] = p["v"]
+
+    price_matrix = [
+        [None if (t, d) not in lookup else round(float(lookup[(t, d)]), 6)
+         for t in tokens]
+        for d in date_list
+    ]
+
     return {
-        "dates":   [str(d.date()) for d in df.index],
-        "tokens":  list(df.columns),
-        "prices":  [[None if v != v else round(float(v), 6) for v in row]
-                    for row in df.values.tolist()],
+        "dates":  date_list,
+        "tokens": tokens,
+        "prices": price_matrix,
     }
 
 
 @app.get("/debug")
 async def debug(x_api_key: str | None = None):
-    """Reports parquet shapes, CG map size, and last log lines."""
+    """Reports DB counts and CG map size."""
     _auth(x_api_key)
-    import pandas as pd
-    from sources import _CG_ID_MAP
-    result = {"cg_id_map_size": len(_CG_ID_MAP)}
-    for name in ["spot_prices", "taker_buy", "taker_sell", "funding"]:
-        p = DATA_DIR / f"{name}.parquet"
-        if p.exists():
-            df = pd.read_parquet(p)
-            result[name] = {"tokens": df.shape[1], "days": df.shape[0],
-                            "first": str(df.index[0].date()), "last": str(df.index[-1].date())}
-        else:
-            result[name] = "missing"
-    return result
+    if _pool is None:
+        return {"error": "no DB pool"}
+    async with _pool.acquire() as conn:
+        counts = {}
+        for panel in ["price", "taker_buy", "taker_sell", "funding", "ls_global"]:
+            counts[panel] = await conn.fetchval(
+                "SELECT COUNT(DISTINCT symbol) FROM mom_raw_series WHERE panel=$1", panel
+            )
+        n_scores = await conn.fetchval("SELECT COUNT(*) FROM mom_scores")
+        n_hist   = await conn.fetchval("SELECT COUNT(DISTINCT date) FROM mom_scores_history")
+    return {
+        "cg_id_map_size": len(CG_IDS),
+        "panels":         counts,
+        "n_scored":       n_scores,
+        "history_dates":  n_hist,
+    }

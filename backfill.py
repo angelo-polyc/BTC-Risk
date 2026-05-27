@@ -1,104 +1,105 @@
 """One-shot historical seed. Run once after first deploy via POST /backfill.
 
 Pulls:
-  - spot prices: 220 days (200 for BTC MA gate + 20 buffer)
-  - CVD (taker buy/sell): 100 days
-  - funding: 100 days (stored for future use, not used in composite yet)
+  - spot prices: 430 days
+  - CVD (taker buy/sell): 385 days
+  - funding: 385 days
+  - L/S global: 385 days
 
-Writes parquets to DATA_DIR, then scores.
+Writes all data to Postgres, then scores and seeds history.
 """
 from __future__ import annotations
 
 import asyncio
-import os
+import json
 from pathlib import Path
 
+import asyncpg
 import pandas as pd
 
+import db
 from sources import SourceAPI
-from scorer import compute_scores, write_scores, compute_history, append_history
+from scorer import compute_scores, compute_history, load_panels_from_db, write_scores_to_db
 from universe import load_symbols
 
-DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 PRICE_DAYS = 430   # 365d scores + 62d warmup (60d rolling beta + 2-day skip)
 CVD_DAYS   = 385   # 365d + 16d warmup + buffer
 FUND_DAYS  = 385
 LS_DAYS    = 385   # 365d + 20d warmup for 60d ts-z (fills in over time)
 
+_HERE  = Path(__file__).parent
+CG_IDS = json.loads((_HERE / "cg_ids.json").read_text())
 
-async def main() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+async def main(pool: asyncpg.Pool) -> None:
     symbols = load_symbols()
-    print(f"[backfill] {len(symbols)} symbols, DATA_DIR={DATA_DIR}")
+    print(f"[backfill] {len(symbols)} symbols")
+
+    # Seed token registry from cg_ids.json
+    token_records = [
+        {"symbol": sym, "cg_id": CG_IDS.get(sym)}
+        for sym in symbols
+    ]
+    await db.upsert_tokens_batch(pool, token_records)
+    print(f"[backfill] upserted {len(token_records)} tokens into mom_tokens")
 
     async with SourceAPI() as api:
         await api.warm_supported()
 
-        results = []
+        # Sequential loop — must stay sequential
         for i, sym in enumerate(symbols, 1):
             try:
                 prices  = await api.spot_history(sym,      limit=PRICE_DAYS)
                 cvd     = await api.cvd_history(sym,       limit=CVD_DAYS)
                 funding = await api.funding_history(sym,   limit=FUND_DAYS)
                 ls      = await api.ls_global_history(sym, limit=LS_DAYS)
+
                 src = "cg" if prices and prices[0].close > 0 else "cglass"
                 print(f"[backfill] [{i}/{len(symbols)}] {sym}: price={len(prices)}({src}) cvd={len(cvd)} funding={len(funding)} ls={len(ls)}")
-                results.append((sym, prices, cvd, funding, ls))
+
+                # Upsert immediately after each token pull
+                if prices:
+                    points = [{"d": str(r.date), "v": r.close} for r in prices]
+                    await db.upsert_raw_series(pool, sym, "price", points)
+                if cvd:
+                    buy_pts  = [{"d": str(r.date), "v": r.buy}  for r in cvd]
+                    sell_pts = [{"d": str(r.date), "v": r.sell} for r in cvd]
+                    await db.upsert_raw_series(pool, sym, "taker_buy",  buy_pts)
+                    await db.upsert_raw_series(pool, sym, "taker_sell", sell_pts)
+                if funding:
+                    points = [{"d": str(r.date), "v": r.close} for r in funding]
+                    await db.upsert_raw_series(pool, sym, "funding", points)
+                if ls:
+                    points = [{"d": str(r.date), "v": r.close} for r in ls]
+                    await db.upsert_raw_series(pool, sym, "ls_global", points)
+
             except Exception as e:
                 print(f"[backfill] [{i}/{len(symbols)}] {sym}: error — {e}")
 
-    # Build panels
-    price_dict, buy_dict, sell_dict, fund_dict, ls_dict = {}, {}, {}, {}, {}
-
-    def dedup(series: pd.Series) -> pd.Series:
-        return series[~series.index.duplicated(keep="last")].sort_index()
-
-    for sym, prices, cvd, funding, ls in results:
-        if prices:
-            idx = pd.DatetimeIndex([r.date for r in prices])
-            price_dict[sym] = dedup(pd.Series([r.close for r in prices], index=idx))
-        if cvd:
-            idx = pd.DatetimeIndex([r.date for r in cvd])
-            buy_dict[sym]  = dedup(pd.Series([r.buy  for r in cvd], index=idx))
-            sell_dict[sym] = dedup(pd.Series([r.sell for r in cvd], index=idx))
-        if funding:
-            idx = pd.DatetimeIndex([r.date for r in funding])
-            fund_dict[sym] = dedup(pd.Series([r.close for r in funding], index=idx))
-        if ls:
-            idx = pd.DatetimeIndex([r.date for r in ls])
-            ls_dict[sym] = dedup(pd.Series([r.close for r in ls], index=idx))
-
-    def _save(d: dict, name: str) -> None:
-        if not d:
-            print(f"[backfill] {name}: no data — skipping")
-            return
-        df = pd.DataFrame(d).sort_index()
-        df.to_parquet(DATA_DIR / name)
-        print(f"[backfill] saved {name}: {df.shape[1]} tokens × {df.shape[0]} days")
-
-    _save(price_dict, "spot_prices.parquet")
-    _save(buy_dict,   "taker_buy.parquet")
-    _save(sell_dict,  "taker_sell.parquet")
-    _save(fund_dict,  "funding.parquet")
-    _save(ls_dict,    "ls_global.parquet")
-
-    # Score + seed 90d history
+    # Score
     try:
-        prices_df = pd.DataFrame(price_dict).sort_index()
-        buy_df    = pd.DataFrame(buy_dict).sort_index()
-        sell_df   = pd.DataFrame(sell_dict).sort_index()
-        ls_df     = pd.DataFrame(ls_dict).sort_index() if ls_dict else pd.DataFrame()
+        prices_df, buy_df, sell_df, fund_df, ls_df = await load_panels_from_db(pool)
 
         # Today's scores
         scores = compute_scores(prices_df, buy_df, sell_df, ls_df)
-        write_scores(scores, DATA_DIR)
+        await write_scores_to_db(pool, scores)
 
-        # Seed full 1-year history from parquets — write in one shot
-        from scorer import HISTORY_RETENTION
+        # Seed full 1-year rank_pct history from the loaded panels
+        from db import HISTORY_RETENTION
         print(f"[backfill] seeding {HISTORY_RETENTION}d score history...")
         hist_df = compute_history(prices_df, buy_df, sell_df, days=HISTORY_RETENTION)
-        hist_df.to_parquet(DATA_DIR / "scores_history.parquet")
-        print(f"[backfill] history seeded: {len(hist_df)} dates × {hist_df.shape[1]} tokens")
+        print(f"[backfill] history computed: {len(hist_df)} dates × {hist_df.shape[1]} tokens")
+
+        hist_rows = []
+        for dt, row in hist_df.iterrows():
+            date_str = str(dt.date()) if hasattr(dt, "date") else str(dt)[:10]
+            for sym, rank_pct in row.items():
+                if rank_pct == rank_pct and rank_pct is not None:  # not NaN
+                    hist_rows.append({"symbol": sym, "date": date_str, "rank_pct": float(rank_pct)})
+
+        await db.upsert_scores_history_batch(pool, hist_rows)
+        print(f"[backfill] history seeded: {len(hist_rows)} rows")
+
     except Exception as e:
         print(f"[backfill] scoring failed: {e}")
 
@@ -106,4 +107,12 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import db as _db
+
+    async def _run():
+        pool = await _db.create_pool()
+        await _db.init_db(pool)
+        await main(pool)
+        await pool.close()
+
+    asyncio.run(_run())

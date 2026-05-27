@@ -8,7 +8,7 @@ BTC 200d MA regime gate determines gate_on status.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -265,3 +265,87 @@ def write_scores(scores: dict, data_dir: Path) -> None:
     tmp.write_text(json.dumps(scores, separators=(",", ":")))
     tmp.replace(out)
     print(f"[scorer] wrote {out} — {scores['n_tokens']} tokens  regime={scores['regime']}")
+
+
+# --------------------------------------------------------------------------- #
+# DB-backed I/O helpers (new — parquet paths left intact above)               #
+# --------------------------------------------------------------------------- #
+
+def _panel_to_df(data: dict[str, list[dict]]) -> pd.DataFrame:
+    """Rebuild a wide DataFrame from {symbol: [{d, v}, ...]}."""
+    series = {}
+    for sym, points in data.items():
+        idx = pd.DatetimeIndex([p["d"] for p in points])
+        series[sym] = pd.Series([p["v"] for p in points], index=idx, dtype=float)
+    if not series:
+        return pd.DataFrame()
+    return pd.DataFrame(series).sort_index()
+
+
+async def load_panels_from_db(
+    pool,
+    price_days: int = 430,
+    cvd_days: int = 385,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load all five panels from Postgres and return as DataFrames.
+
+    Returns: (prices_df, buy_df, sell_df, fund_df, ls_df)
+    """
+    import db as _db
+    prices_raw = await _db.get_raw_panel(pool, "price",       price_days)
+    buy_raw    = await _db.get_raw_panel(pool, "taker_buy",   cvd_days)
+    sell_raw   = await _db.get_raw_panel(pool, "taker_sell",  cvd_days)
+    fund_raw   = await _db.get_raw_panel(pool, "funding",     cvd_days)
+    ls_raw     = await _db.get_raw_panel(pool, "ls_global",   cvd_days)
+
+    prices_df = _panel_to_df(prices_raw)
+    buy_df    = _panel_to_df(buy_raw)
+    sell_df   = _panel_to_df(sell_raw)
+    fund_df   = _panel_to_df(fund_raw)
+    ls_df     = _panel_to_df(ls_raw)
+
+    return prices_df, buy_df, sell_df, fund_df, ls_df
+
+
+async def write_scores_to_db(pool, scores_dict: dict) -> None:
+    """Write compute_scores() output to mom_scores, mom_regime, and mom_scores_history."""
+    import db as _db
+
+    today_str = date.today().isoformat()
+
+    # --- mom_scores ---
+    score_rows = []
+    for s in scores_dict.get("scores", []):
+        score_rows.append({
+            "symbol":       s["symbol"],
+            "as_of":        scores_dict["as_of"],
+            "score":        s.get("score"),
+            "rank_pct":     s.get("rank_pct"),
+            "res14_z":      s.get("res14_z"),
+            "raw14_z":      s.get("raw14_z"),
+            "raw7_z":       s.get("raw7_z"),
+            "cvd_pct":      s.get("cvd_pct"),
+            "ls_ext_short": s.get("ls_ext_short"),
+        })
+    await _db.upsert_scores_batch(pool, score_rows)
+
+    # --- mom_regime ---
+    regime = {
+        "as_of":     scores_dict["as_of"],
+        "regime":    scores_dict["regime"],
+        "gate_on":   scores_dict["gate_on"],
+        "btc_price": scores_dict.get("btc_price"),
+        "btc_ma200": scores_dict.get("btc_ma200"),
+        "n_tokens":  scores_dict.get("n_tokens", len(score_rows)),
+    }
+    await _db.upsert_regime(pool, regime)
+
+    # --- mom_scores_history (today's rank_pct snapshot) ---
+    hist_rows = [
+        {"symbol": s["symbol"], "date": today_str, "rank_pct": s["rank_pct"]}
+        for s in scores_dict.get("scores", [])
+        if s.get("rank_pct") is not None
+    ]
+    await _db.upsert_scores_history_batch(pool, hist_rows)
+
+    print(f"[scorer] DB write complete — {len(score_rows)} tokens  regime={scores_dict['regime']}")
