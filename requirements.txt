@@ -20,6 +20,9 @@ cot_reports>=0.1
 artemis>=0.1
 requests>=2.31
 
+# ─── Database ─────────────────────────────────────────────────────────────
+psycopg2-binary>=2.9
+
 # ─── Ops layer (scheduler, REST API, MCP server) ──────────────────────────
 apscheduler>=3.10
 pyyaml>=6.0

@@ -70,3 +70,6 @@ steps:
     # (was /app pre-refactor; now /app/data alongside the volume-backed parquets).
     cmd: ["python3", "audit_log.py", "--master-dir", "/app/data", "--log-dir", "/app/data", "--no-git"]
     timeout_sec: 60
+  - name: db_writer
+    cmd: ["python3", "db_writer.py"]
+    timeout_sec: 120
