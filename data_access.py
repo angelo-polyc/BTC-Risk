@@ -249,7 +249,10 @@ def _raw_path() -> Path:
 def _load_raw() -> pd.DataFrame:
     p = _raw_path()
     if not p.exists():
-        raise FileNotFoundError(f"raw_data_export.csv not found at {p}")
+        raise ValueError(
+            "raw_data_export.csv is not available on this service — "
+            "query the risk-model service directly for raw data access"
+        )
     return pd.read_csv(p, parse_dates=["date"], low_memory=False)
 
 
