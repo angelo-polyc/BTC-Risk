@@ -1140,8 +1140,14 @@
       </div>
       <div class="toggle" id="mom-view-toggle" style="margin-left:8px">
         <button data-view="screener" class="active">Screener</button>
+        <button data-view="preq5">Pre-Q5</button>
         <button data-view="heatmap">Heatmap</button>
         <button data-view="chart">Chart</button>
+      </div>
+      <div class="toggle" id="mom-time-toggle" style="display:none;margin-left:8px">
+        <button data-days="365" class="active">1Y</button>
+        <button data-days="182">6M</button>
+        <button data-days="91">3M</button>
       </div>
       <div class="mom-token-select-wrap" id="mom-token-select-wrap" style="display:none;margin-left:8px">
         <div id="mom-token-chips" style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;"></div>
@@ -1156,6 +1162,9 @@
   </div>
   <div id="mom-screener-wrap">
     <div class="placeholder tall">screener · awaiting load</div>
+  </div>
+  <div id="mom-preq5-wrap" style="display:none">
+    <div class="placeholder tall">pre-q5 · awaiting load</div>
   </div>
   <div id="mom-heatmap-wrap" style="display:none">
     <canvas id="mom-heatmap-canvas"></canvas>
@@ -3155,6 +3164,7 @@ const MOM_TOKEN_COLORS = [
 let _momSelectedTokens = ["BTC"];  // BTC always first
 let _momTokenColorMap  = { BTC: "#f7931a" };
 let _momColorIdx = 1;  // next color index (0 is BTC orange)
+let _momChartDays = 365;  // chart display window: 365 | 182 | 91
 let _momHeatmapDrawn = false;
 let _momHeatmapHoverSetup = false;
 let _momHeatmapLayout = null;
@@ -3197,7 +3207,11 @@ async function fetchWithTimeout(url) {
 async function loadMomentumScores(force = false) {
   const metaEl = document.getElementById("mom-meta");
   const wrap   = document.getElementById("mom-screener-wrap");
-  if (_momScores && !force) { renderMomentumScreener(); return; }
+  if (_momScores && !force) {
+    if (_momViewMode === "screener") renderMomentumScreener();
+    if (_momViewMode === "preq5")    renderMomentumPreQ5();
+    return;
+  }
   metaEl.textContent = "loading…";
   wrap.innerHTML = `<div class="placeholder tall">loading momentum scores…</div>`;
   try {
@@ -3210,10 +3224,10 @@ async function loadMomentumScores(force = false) {
       `${q5n} in Q5 (rank_pct ≥ 0.80) of ${n_tokens}`;
     /* Populate token selector from this universe */
     _populateMomTokenSelect(_momScores.scores || []);
-    renderMomentumScreener();
-    /* If heatmap or chart is current view, also trigger those renders */
-    if (_momViewMode === "heatmap") loadMomentumHistory();
-    if (_momViewMode === "chart")   loadMomentumChart();
+    if (_momViewMode === "screener") renderMomentumScreener();
+    if (_momViewMode === "preq5")    renderMomentumPreQ5();
+    if (_momViewMode === "heatmap")  loadMomentumHistory();
+    if (_momViewMode === "chart")    loadMomentumChart();
   } catch(e) {
     metaEl.textContent = "load failed: " + e.message;
     wrap.innerHTML = `<div class="placeholder error">momentum scores load failed: ${e.message}</div>`;
@@ -3417,6 +3431,98 @@ function renderMomentumScreener() {
 /* ─── View 2: Heatmap (7d MA of rank_pct) ─── */
 
 const MOM_HM_CELL_H  = 16;
+/* ─── View 1b: Pre-Q5 screener ─── */
+function renderMomentumPreQ5() {
+  const wrap = document.getElementById("mom-preq5-wrap");
+  if (!_momScores) { wrap.innerHTML = `<div class="placeholder tall">pre-q5 · awaiting load</div>`; return; }
+
+  const { scores, gate_on } = _momScores;
+  const bearMode = gate_on === false;
+
+  /* Only non-Q5 tokens with a pre_mom_rank_pct */
+  let rows = scores.filter(r => r.rank_pct < 0.80 && r.pre_mom_rank_pct != null);
+  rows.sort((a, b) => b.pre_mom_rank_pct - a.pre_mom_rank_pct);
+  if (_momQ5Only) rows = rows.slice(0, 28);  /* top-quintile pre-mom (~28 names) */
+
+  if (!rows.length) { wrap.innerHTML = `<div class="placeholder">no pre-Q5 candidates available</div>`; return; }
+
+  function compBar(val, isZscore, label) {
+    if (val == null) return `<div class="mom-comp-item" title="${label}"><div class="mom-comp-bar-wrap"></div></div>`;
+    const CLIP = 2.5;
+    let pct, pos;
+    if (isZscore) {
+      const clipped = Math.max(-CLIP, Math.min(CLIP, val));
+      pos = clipped >= 0;
+      pct = (Math.abs(clipped) / CLIP) * 50;
+    } else {
+      pos = val >= 0.5; pct = Math.abs(val - 0.5) / 0.5 * 50;
+    }
+    const col = pos ? "var(--bull)" : "var(--bear)";
+    const bar = pos
+      ? `<div style="position:absolute;left:50%;width:${pct}%;height:100%;background:${col};opacity:0.7"></div>`
+      : `<div style="position:absolute;right:50%;width:${pct}%;height:100%;background:${col};opacity:0.7"></div>`;
+    return `<div class="mom-comp-item" title="${label}: ${val.toFixed ? val.toFixed(2) : val}"><div class="mom-comp-bar-wrap" style="position:relative">${bar}</div></div>`;
+  }
+
+  const tableRows = rows.map(r => {
+    const rawDown = bearMode && r.raw14_z != null && r.raw14_z < 0;
+    const prePct  = r.pre_mom_rank_pct != null ? r.pre_mom_rank_pct : 0;
+    const curPct  = r.rank_pct != null ? r.rank_pct : 0;
+
+    const preBarHtml = `<div class="mom-rank-bar">
+      <div class="mom-rank-bar-track">
+        <div class="mom-rank-bar-fill" style="width:${(prePct*100).toFixed(1)}%;background:#3498db;opacity:0.75;"></div>
+      </div>
+      <div class="mom-rank-bar-val">${(prePct*100).toFixed(0)}%</div>
+    </div>`;
+
+    const curBarHtml = `<div class="mom-rank-bar" style="opacity:0.5">
+      <div class="mom-rank-bar-track">
+        <div class="mom-rank-bar-fill" style="width:${(curPct*100).toFixed(1)}%;background:var(--ink-softer);opacity:0.75;"></div>
+      </div>
+      <div class="mom-rank-bar-val">${(curPct*100).toFixed(0)}%</div>
+    </div>`;
+
+    const compHtml = `<div class="mom-comp-bars">
+      ${compBar(r.res14_z, true, "res14_z")}
+      ${compBar(r.raw14_z, true, "raw14_z")}
+      ${compBar(r.raw7_z,  true, "raw7_z")}
+      ${compBar(r.cvd_pct, false,"cvd_pct")}
+    </div>`;
+
+    let flagsHtml = "";
+    if (r.cvd_pct != null && r.cvd_pct < 0.5)
+      flagsHtml += `<span class="mom-flag cvd-warn" data-tooltip="Net taker sell pressure over the past 7 days. Distribution risk — consider reduced sizing.">CVD↓</span>`;
+    if (r.ls_ext_short === true)
+      flagsHtml += `<span class="mom-flag ls-ext" data-tooltip="Crowded short positioning relative to 60-day history. Potential short squeeze amplifier.">⚡</span>`;
+    if (rawDown)
+      flagsHtml += `<span class="mom-flag raw-down" data-tooltip="Raw 14-day return below universe average in bear regime. Lower conviction.">RAW↓</span>`;
+
+    return `<tr>
+      <td>${r.symbol}</td>
+      <td>${preBarHtml}</td>
+      <td>${curBarHtml}</td>
+      <td>${compHtml}</td>
+      <td>${flagsHtml}</td>
+    </tr>`;
+  }).join("");
+
+  wrap.innerHTML = `
+    <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--ink-soft);padding:8px 0 10px;letter-spacing:0.03em">
+      ~59% of top-ranked names enter Q5 within 14 days &nbsp;·&nbsp; blue bar = pre-momentum rank &nbsp;·&nbsp; grey bar = current rank
+    </div>
+    <table class="mom-table">
+      <colgroup>
+        <col style="width:10%"><col style="width:18%"><col style="width:14%"><col style="width:42%"><col style="width:16%">
+      </colgroup>
+      <thead><tr>
+        <th>Token</th><th>Pre-mom rank</th><th>Current rank</th>
+        <th>Components (res14 · raw14 · raw7 · cvd)</th><th>Flags</th>
+      </tr></thead>
+      <tbody>${tableRows}</tbody>
+    </table>`;
+}
+
 const MOM_HM_LABEL_W = 60;
 const MOM_HM_TOP_M   = 28;
 const MOM_HM_RIGHT_P = 4;
@@ -3579,7 +3685,8 @@ function renderMomentumChart() {
   const { dates: pDates, tokens: pTokens, prices: pData } = _momPrices;
   const { dates: hDates, tokens: hTokens, rank_pcts }      = _momHistory;
 
-  const allDates = pDates.slice();
+  const allDates   = pDates.slice(-_momChartDays);
+  const dateOffset = pDates.length - allDates.length;
   const nDates   = allDates.length;
 
   /* Build per-token price and rank series */
@@ -3587,7 +3694,7 @@ function renderMomentumChart() {
     const pTi = pTokens.indexOf(sym);
     const hTi = hTokens.indexOf(sym);
     const color = _momTokenColorMap[sym] || "#545450";
-    const priceVals = allDates.map((_, di) => pTi >= 0 && pData[di][pTi] != null ? pData[di][pTi] : null);
+    const priceVals = allDates.map((_, di) => pTi >= 0 && pData[dateOffset + di] && pData[dateOffset + di][pTi] != null ? pData[dateOffset + di][pTi] : null);
     const rankRaw   = allDates.map(d => {
       const hi = hDates.indexOf(d);
       return (hi >= 0 && hTi >= 0 && rank_pcts[hi][hTi] != null) ? rank_pcts[hi][hTi] : null;
@@ -3801,16 +3908,19 @@ function setupMomentumToggles() {
       _momQ5Only = btn.dataset.q5 === "true";
       q5Toggle.querySelectorAll("button").forEach(b => b.classList.toggle("active", b === btn));
       if (_momViewMode === "screener") renderMomentumScreener();
+      if (_momViewMode === "preq5")    renderMomentumPreQ5();
       if (_momViewMode === "heatmap")  { _momHeatmapDrawn = false; renderMomentumHeatmap(); }
     });
   });
 
   /* View toggle */
-  const viewToggle = document.getElementById("mom-view-toggle");
+  const viewToggle   = document.getElementById("mom-view-toggle");
   const screenerWrap = document.getElementById("mom-screener-wrap");
+  const preq5Wrap    = document.getElementById("mom-preq5-wrap");
   const heatmapWrap  = document.getElementById("mom-heatmap-wrap");
   const chartWrap    = document.getElementById("mom-chart-wrap");
   const tokenSelWrap = document.getElementById("mom-token-select-wrap");
+  const timeToggle   = document.getElementById("mom-time-toggle");
 
   viewToggle.querySelectorAll("button").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -3818,12 +3928,24 @@ function setupMomentumToggles() {
       viewToggle.querySelectorAll("button").forEach(b => b.classList.toggle("active", b === btn));
 
       screenerWrap.style.display = _momViewMode === "screener" ? "" : "none";
+      preq5Wrap.style.display    = _momViewMode === "preq5"    ? "" : "none";
       heatmapWrap.style.display  = _momViewMode === "heatmap"  ? "" : "none";
       chartWrap.style.display    = _momViewMode === "chart"    ? "block" : "none";
       tokenSelWrap.style.display = _momViewMode === "chart"    ? "" : "none";
+      timeToggle.style.display   = _momViewMode === "chart"    ? "" : "none";
 
-      if (_momViewMode === "heatmap") loadMomentumHistory();
-      if (_momViewMode === "chart")   loadMomentumChart();
+      if (_momViewMode === "preq5")    renderMomentumPreQ5();
+      if (_momViewMode === "heatmap")  loadMomentumHistory();
+      if (_momViewMode === "chart")    loadMomentumChart();
+    });
+  });
+
+  /* Time window toggle */
+  timeToggle.querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      _momChartDays = parseInt(btn.dataset.days, 10);
+      timeToggle.querySelectorAll("button").forEach(b => b.classList.toggle("active", b === btn));
+      if (_momViewMode === "chart") renderMomentumChart();
     });
   });
 
