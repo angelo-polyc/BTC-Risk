@@ -3448,10 +3448,12 @@ function renderMomentumHeatmap() {
     return 0;
   });
 
-  /* Sort by current rank_pct descending, cap at MOM_HM_MAX_TOKENS */
-  const order = tokens.map((sym, i) => ({ sym, i, rank: tokenCurrentRank[i] }))
-    .sort((a, b) => b.rank - a.rank)
-    .slice(0, MOM_HM_MAX_TOKENS);
+  /* Sort by current rank_pct descending; Q5 mode caps at top 80, All mode shows all */
+  const Q5_THRESHOLD = 0.80;
+  let ordered = tokens.map((sym, i) => ({ sym, i, rank: tokenCurrentRank[i] }))
+    .sort((a, b) => b.rank - a.rank);
+  if (_momQ5Only) ordered = ordered.filter(t => t.rank >= Q5_THRESHOLD).slice(0, MOM_HM_MAX_TOKENS);
+  const order = ordered;
 
   /* Compute 7-day rolling mean per selected token */
   const MA_WINDOW = 7;
@@ -3783,6 +3785,7 @@ function setupMomentumToggles() {
       _momQ5Only = btn.dataset.q5 === "true";
       q5Toggle.querySelectorAll("button").forEach(b => b.classList.toggle("active", b === btn));
       if (_momViewMode === "screener") renderMomentumScreener();
+      if (_momViewMode === "heatmap")  { _momHeatmapDrawn = false; renderMomentumHeatmap(); }
     });
   });
 
