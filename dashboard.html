@@ -3343,26 +3343,20 @@ function renderMomentumScreener() {
   /* Component bar HTML — z-scores clip to ±2.5, CVD is 0-1 */
   function compBar(val, isZscore, label) {
     if (val == null) {
-      return `<div class="mom-comp-item">
-        <div class="mom-comp-label">${label}</div>
-        <div class="mom-comp-bar-wrap"><div class="mom-comp-mid"></div></div>
-      </div>`;
+      return `<div class="mom-comp-item" title="${label}"><div class="mom-comp-bar-wrap"><div class="mom-comp-mid"></div></div></div>`;
     }
     let frac;
     if (isZscore) {
-      /* Map z-score: 0 at center (50%), ±2.5 → 0% / 100% */
-      frac = Math.max(-2.5, Math.min(2.5, val)) / 2.5;  /* -1 to +1 */
+      frac = Math.max(-2.5, Math.min(2.5, val)) / 2.5;
     } else {
-      /* CVD: already 0-1, re-center around 0.5 */
-      frac = (Math.max(0, Math.min(1, val)) - 0.5) * 2;  /* -1 to +1 */
+      frac = (Math.max(0, Math.min(1, val)) - 0.5) * 2;
     }
     const isPos = frac >= 0;
-    const absW  = Math.abs(frac) * 50;  /* pct of half-width */
+    const absW  = Math.abs(frac) * 50;
     const left  = isPos ? "50%" : (50 - absW).toFixed(1) + "%";
     const width = absW.toFixed(1) + "%";
     const color = isPos ? "var(--bull)" : "var(--bear)";
-    return `<div class="mom-comp-item">
-      <div class="mom-comp-label">${label}</div>
+    return `<div class="mom-comp-item" title="${label}: ${val.toFixed(2)}">
       <div class="mom-comp-bar-wrap">
         <div class="mom-comp-mid"></div>
         <div class="mom-comp-fill" style="left:${left};width:${width};background:${color};opacity:0.75;"></div>
