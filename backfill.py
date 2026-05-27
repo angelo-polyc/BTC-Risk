@@ -34,20 +34,18 @@ async def main() -> None:
     async with SourceAPI() as api:
         await api.warm_supported()
 
-        sem = asyncio.Semaphore(2)  # reduced from 4; each token makes 4 CG API calls, 4×4=16 concurrent was hitting rate limits
-
-        async def pull(sym: str):
-            async with sem:
+        results = []
+        for i, sym in enumerate(symbols, 1):
+            try:
                 prices  = await api.spot_history(sym,      limit=PRICE_DAYS)
                 cvd     = await api.cvd_history(sym,       limit=CVD_DAYS)
                 funding = await api.funding_history(sym,   limit=FUND_DAYS)
                 ls      = await api.ls_global_history(sym, limit=LS_DAYS)
                 src = "cg" if prices and prices[0].close > 0 else "cglass"
-                print(f"[backfill] {sym}: price={len(prices)}({src}) cvd={len(cvd)} funding={len(funding)} ls={len(ls)}")
-                return sym, prices, cvd, funding, ls
-
-        results = await asyncio.gather(*(pull(s) for s in symbols), return_exceptions=True)
-    results = [r for r in results if not isinstance(r, Exception)]
+                print(f"[backfill] [{i}/{len(symbols)}] {sym}: price={len(prices)}({src}) cvd={len(cvd)} funding={len(funding)} ls={len(ls)}")
+                results.append((sym, prices, cvd, funding, ls))
+            except Exception as e:
+                print(f"[backfill] [{i}/{len(symbols)}] {sym}: error — {e}")
 
     # Build panels
     price_dict, buy_dict, sell_dict, fund_dict, ls_dict = {}, {}, {}, {}, {}
