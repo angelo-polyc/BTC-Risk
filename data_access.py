@@ -1,124 +1,130 @@
-"""Shared data-access layer for the BTC model ops stack.
+"""Postgres-backed data access layer for the BTC model ops stack.
 
-Pure functions that read the committed CSV artifacts produced by the
-pipeline. Used by:
-  * api_server.py    — HTTP/JSON layer (bearer auth)
-  * mcp_server.py    — MCP tools for Claude Code agents
+Replaces the CSV/file reads with queries against the shared Postgres DB
+populated by db_writer.py on the risk-model service after each daily run.
 
-No model logic here. No mutation of any file. Only reads.
+/raw endpoints remain file-backed (162 cols × 26K rows, not in Postgres).
 
-Everything is keyed off BTC_MODEL_DIR (env var, defaults to cwd). In a
-Replit Reserved VM deployment this is the project checkout where
-run_all.sh lives and where the daily pipeline writes its outputs.
+Function signatures are identical to the previous version so api_server.py
+and mcp_server.py need no changes.
 """
 from __future__ import annotations
 
 import json
 import math
 import os
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import psycopg2
+import psycopg2.extras
+import psycopg2.pool
 
-# ─── File layout (mirrors /mnt/project/ flat structure) ───────────────────────
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
 
-HYPOTHESES = ["macro_equities", "cme", "crypto_derivatives",
-              "classic_cycle", "etf_flows", "eth"]
-VARIANTS = ["wf365", "sf730"]
-LABELS = ["y_60", "y_30"]
+DATABASE_URL = os.environ.get("DATABASE_URL", "").replace("postgres://", "postgresql://", 1)
 
-MASTER_FILES = {v: f"master_daily_view_{v}.csv" for v in VARIANTS}
-HYPOTHESIS_FILES = {h: f"hypothesis_{h}.csv" for h in HYPOTHESES}
+HYPOTHESES = ["macro_equities", "cme", "crypto_derivatives", "classic_cycle", "etf_flows", "eth"]
+VARIANTS   = ["wf365", "sf730"]
+LABELS     = ["y_60", "y_30"]
 
 
 def project_dir() -> Path:
     return Path(os.environ.get("BTC_MODEL_DIR", ".")).expanduser().resolve()
 
 
-def _path(name: str) -> Path:
-    return project_dir() / name
+# ---------------------------------------------------------------------------
+# Connection pool (lazy init, thread-safe)
+# ---------------------------------------------------------------------------
+
+_pool: psycopg2.pool.ThreadedConnectionPool | None = None
 
 
-# ─── JSON-safe conversion ─────────────────────────────────────────────────────
-# pandas.to_dict emits float('nan') for missing numerics, which is not valid
-# JSON. We replace NaN/Inf with None at the boundary so API and MCP responses
-# are round-trippable.
+def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
+    global _pool
+    if _pool is None:
+        if not DATABASE_URL:
+            raise RuntimeError("DATABASE_URL not set")
+        _pool = psycopg2.pool.ThreadedConnectionPool(1, 10, DATABASE_URL)
+    return _pool
 
-def _clean_value(v: Any) -> Any:
-    if isinstance(v, float):
-        if math.isnan(v) or math.isinf(v):
-            return None
-    if isinstance(v, pd.Timestamp):
-        return v.strftime("%Y-%m-%d")
+
+def _query(sql: str, params=None) -> list[dict]:
+    pool = _get_pool()
+    conn = pool.getconn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params)
+            return [dict(r) for r in cur.fetchall()]
+    finally:
+        pool.putconn(conn)
+
+
+# ---------------------------------------------------------------------------
+# JSON-safe conversion
+# ---------------------------------------------------------------------------
+
+def _clean(v: Any) -> Any:
+    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+        return None
     return v
 
 
-def _df_to_records(df: pd.DataFrame) -> list[dict[str, Any]]:
-    if df.empty:
-        return []
-    out = df.to_dict(orient="records")
-    return [{k: _clean_value(v) for k, v in row.items()} for row in out]
+def _clean_row(row: dict) -> dict:
+    return {k: _clean(v) for k, v in row.items()}
 
 
-def _filter_date_range(df: pd.DataFrame, date_col: str,
-                       from_date: str | None, to_date: str | None) -> pd.DataFrame:
-    if from_date:
-        df = df[df[date_col] >= pd.Timestamp(from_date)]
-    if to_date:
-        df = df[df[date_col] <= pd.Timestamp(to_date)]
-    return df
+def _parse_jsonb(v) -> Any:
+    """psycopg2 returns JSONB as Python objects, but handle string case too."""
+    if isinstance(v, str):
+        return json.loads(v)
+    return v
 
 
-# ─── Cached loaders ───────────────────────────────────────────────────────────
-# Caches are keyed by file mtime so that a fresh pipeline run (which rewrites
-# these CSVs) is picked up automatically without restarting the server.
-
-def _cache_key(path: Path) -> tuple[str, float]:
-    return (str(path), path.stat().st_mtime if path.exists() else 0.0)
-
-
-@lru_cache(maxsize=16)
-def _load_csv_cached(key: tuple[str, float], parse_dates: tuple[str, ...]) -> pd.DataFrame:
-    path = Path(key[0])
-    if not path.exists():
-        raise FileNotFoundError(f"missing: {path}")
-    return pd.read_csv(
-        path,
-        parse_dates=list(parse_dates) if parse_dates else None,
-        low_memory=False,
-    )
-
-
-def _load_csv(path: Path, parse_dates: tuple[str, ...] = ()) -> pd.DataFrame:
-    return _load_csv_cached(_cache_key(path), parse_dates)
-
-
-# ─── Master daily view ────────────────────────────────────────────────────────
-
-def _load_master(variant: str) -> pd.DataFrame:
-    if variant not in VARIANTS:
-        raise ValueError(f"variant must be one of {VARIANTS}, got {variant!r}")
-    return _load_csv(_path(MASTER_FILES[variant]), parse_dates=("date",))
-
+# ---------------------------------------------------------------------------
+# Master daily view
+# ---------------------------------------------------------------------------
 
 def get_today(variant: str = "wf365") -> dict[str, Any]:
-    df = _load_master(variant)
-    if df.empty:
+    if variant not in VARIANTS:
+        raise ValueError(f"variant must be one of {VARIANTS}, got {variant!r}")
+    rows = _query(
+        "SELECT date, data FROM model_daily WHERE variant=%s ORDER BY date DESC LIMIT 1",
+        (variant,)
+    )
+    if not rows:
         return {}
-    row = df.sort_values("date").iloc[-1].to_dict()
-    return {k: _clean_value(v) for k, v in row.items()}
+    r = rows[0]
+    result = {"date": r["date"]}
+    result.update(_parse_jsonb(r["data"]))
+    return _clean_row(result)
 
 
 def get_history(from_date: str | None = None, to_date: str | None = None,
                 variant: str = "wf365") -> list[dict[str, Any]]:
-    df = _load_master(variant)
-    df = _filter_date_range(df, "date", from_date, to_date)
-    return _df_to_records(df.sort_values("date"))
+    if variant not in VARIANTS:
+        raise ValueError(f"variant must be one of {VARIANTS}, got {variant!r}")
+    sql    = "SELECT date, data FROM model_daily WHERE variant=%s"
+    params: list = [variant]
+    if from_date:
+        sql += " AND date >= %s"; params.append(from_date)
+    if to_date:
+        sql += " AND date <= %s"; params.append(to_date)
+    sql += " ORDER BY date"
+    out = []
+    for r in _query(sql, params):
+        row = {"date": r["date"]}
+        row.update(_parse_jsonb(r["data"]))
+        out.append(_clean_row(row))
+    return out
 
 
-# ─── Hypothesis scores (with sub-signals) ─────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Hypothesis scores
+# ---------------------------------------------------------------------------
 
 def list_hypotheses() -> list[str]:
     return list(HYPOTHESES)
@@ -126,17 +132,32 @@ def list_hypotheses() -> list[str]:
 
 def get_hypothesis(name: str, from_date: str | None = None,
                    to_date: str | None = None) -> list[dict[str, Any]]:
-    if name not in HYPOTHESIS_FILES:
+    if name not in HYPOTHESES:
         raise ValueError(f"hypothesis must be one of {HYPOTHESES}, got {name!r}")
-    df = _load_csv(_path(HYPOTHESIS_FILES[name]), parse_dates=("date",))
-    df = _filter_date_range(df, "date", from_date, to_date)
-    return _df_to_records(df.sort_values("date"))
+    sql    = "SELECT date, data FROM model_hypothesis WHERE name=%s"
+    params: list = [name]
+    if from_date:
+        sql += " AND date >= %s"; params.append(from_date)
+    if to_date:
+        sql += " AND date <= %s"; params.append(to_date)
+    sql += " ORDER BY date"
+    out = []
+    for r in _query(sql, params):
+        row = {"date": r["date"]}
+        row.update(_parse_jsonb(r["data"]))
+        out.append(_clean_row(row))
+    return out
 
 
-# ─── Weights + walk-forward weight history ────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Weights
+# ---------------------------------------------------------------------------
 
 def get_weights() -> list[dict[str, Any]]:
-    return _df_to_records(_load_csv(_path("weights.csv")))
+    rows = _query("SELECT data FROM model_kv WHERE key='weights'")
+    if not rows:
+        return []
+    return [_clean_row(r) for r in _parse_jsonb(rows[0]["data"])]
 
 
 def get_weight_history(variant: str = "wf365", label: str = "y_60",
@@ -146,53 +167,97 @@ def get_weight_history(variant: str = "wf365", label: str = "y_60",
         raise ValueError(f"variant must be one of {VARIANTS}, got {variant!r}")
     if label not in LABELS:
         raise ValueError(f"label must be one of {LABELS}, got {label!r}")
-    path = _path(f"weight_history_{variant}_{label}.csv")
-    df = _load_csv(path, parse_dates=("fit_date",))
-    df = _filter_date_range(df, "fit_date", from_date, to_date)
-    return _df_to_records(df.sort_values("fit_date"))
+    sql    = "SELECT fit_date, data FROM model_weight_history WHERE variant=%s AND label=%s"
+    params: list = [variant, label]
+    if from_date:
+        sql += " AND fit_date >= %s"; params.append(from_date)
+    if to_date:
+        sql += " AND fit_date <= %s"; params.append(to_date)
+    sql += " ORDER BY fit_date"
+    out = []
+    for r in _query(sql, params):
+        row = {"fit_date": r["fit_date"]}
+        row.update(_parse_jsonb(r["data"]))
+        out.append(_clean_row(row))
+    return out
 
 
-# ─── Health check / drift monitor ─────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Health / drift monitor
+# ---------------------------------------------------------------------------
 
 def get_health() -> list[dict[str, Any]]:
-    return _df_to_records(_load_csv(_path("health_check.csv")))
+    rows = _query("SELECT data FROM model_kv WHERE key='health_current'")
+    if not rows:
+        return []
+    return [_clean_row(r) for r in _parse_jsonb(rows[0]["data"])]
 
 
 def get_health_flags() -> list[dict[str, Any]]:
-    df = _load_csv(_path("health_check.csv"))
-    if "flagged" in df.columns:
-        # bool dtype may round-trip as bool-string in CSV; handle both
-        flagged = df["flagged"].astype(str).str.lower().isin(["true", "1"]) \
-            if df["flagged"].dtype == object else df["flagged"].astype(bool)
-        df = df[flagged]
-    return _df_to_records(df)
+    rows = get_health()
+    return [r for r in rows
+            if str(r.get("flagged", "")).lower() in ("true", "1")]
 
 
 def get_health_history(from_date: str | None = None,
                        to_date: str | None = None,
                        extended: bool = False) -> list[dict[str, Any]]:
-    filename = "health_check_history_extended.csv" if extended else "health_check_history.csv"
-    path = _path(filename)
-    df = _load_csv(path, parse_dates=("replay_date",))
-    df = _filter_date_range(df, "replay_date", from_date, to_date)
-    return _df_to_records(df.sort_values("replay_date"))
+    sql    = "SELECT replay_date, data FROM model_health_history WHERE extended=%s"
+    params: list = [extended]
+    if from_date:
+        sql += " AND replay_date >= %s"; params.append(from_date)
+    if to_date:
+        sql += " AND replay_date <= %s"; params.append(to_date)
+    sql += " ORDER BY replay_date"
+    out = []
+    for r in _query(sql, params):
+        row = {"replay_date": r["replay_date"]}
+        row.update(_parse_jsonb(r["data"]))
+        out.append(_clean_row(row))
+    return out
 
+
+# ---------------------------------------------------------------------------
+# Shadow state
+# ---------------------------------------------------------------------------
 
 def get_shadow_state(from_date: str | None = None,
                      to_date: str | None = None) -> list[dict[str, Any]]:
-    df = _load_csv(_path("shadow_state.csv"), parse_dates=("date",))
-    df = _filter_date_range(df, "date", from_date, to_date)
-    return _df_to_records(df.sort_values("date"))
+    conditions, params = [], []
+    if from_date:
+        conditions.append("date >= %s"); params.append(from_date)
+    if to_date:
+        conditions.append("date <= %s"); params.append(to_date)
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    sql = f"SELECT date, data FROM model_shadow {where} ORDER BY date"
+    out = []
+    for r in _query(sql, params or None):
+        row = {"date": r["date"]}
+        row.update(_parse_jsonb(r["data"]))
+        out.append(_clean_row(row))
+    return out
 
 
-# ─── Raw data (26K rows × 162 cols — column-selectable, range-required) ───────
+# ---------------------------------------------------------------------------
+# Raw data — file-backed (too large for Postgres)
+# ---------------------------------------------------------------------------
+
+def _raw_path() -> Path:
+    return project_dir() / "raw_data_export.csv"
+
+
+def _load_raw() -> pd.DataFrame:
+    p = _raw_path()
+    if not p.exists():
+        raise FileNotFoundError(f"raw_data_export.csv not found at {p}")
+    return pd.read_csv(p, parse_dates=["date"], low_memory=False)
+
 
 def list_raw_columns() -> dict[str, Any]:
-    df = _load_csv(_path("raw_data_export.csv"), parse_dates=("date",))
+    df = _load_raw()
     cols = [c for c in df.columns if c != "date"]
     grouped: dict[str, list[str]] = {}
     for c in cols:
-        # Columns are named like `fred__SP500__value`, `velo_btc__funding_rate__binance-futures__value`
         prefix = c.split("__", 1)[0] if "__" in c else c
         grouped.setdefault(prefix, []).append(c)
     return {
@@ -209,67 +274,78 @@ def get_raw_data(columns: list[str],
                  from_date: str | None = None,
                  to_date: str | None = None) -> list[dict[str, Any]]:
     if not columns:
-        raise ValueError("columns must be non-empty; use list_raw_columns() to discover")
-    df = _load_csv(_path("raw_data_export.csv"), parse_dates=("date",))
+        raise ValueError("columns must be non-empty")
+    df = _load_raw()
     unknown = [c for c in columns if c not in df.columns]
     if unknown:
         raise ValueError(f"unknown columns: {unknown}")
     df = df[["date"] + columns]
-    df = _filter_date_range(df, "date", from_date, to_date)
-    return _df_to_records(df.sort_values("date"))
+    if from_date:
+        df = df[df["date"] >= pd.Timestamp(from_date)]
+    if to_date:
+        df = df[df["date"] <= pd.Timestamp(to_date)]
+    return [{k: (v.strftime("%Y-%m-%d") if isinstance(v, pd.Timestamp) else
+                 (None if isinstance(v, float) and math.isnan(v) else v))
+             for k, v in row.items()}
+            for row in df.sort_values("date").to_dict(orient="records")]
 
 
-# ─── Metadata ─────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Metadata
+# ---------------------------------------------------------------------------
 
 def get_manifest() -> dict[str, Any]:
-    path = _path("export_manifest.json")
-    if not path.exists():
+    rows = _query("SELECT data FROM model_kv WHERE key='manifest'")
+    if not rows:
         return {}
-    return json.loads(path.read_text())
+    return _parse_jsonb(rows[0]["data"])
 
 
 def get_thresholds() -> list[dict[str, Any]]:
-    return _df_to_records(_load_csv(_path("thresholds.csv")))
+    rows = _query("SELECT data FROM model_kv WHERE key='thresholds'")
+    if not rows:
+        return []
+    return [_clean_row(r) for r in _parse_jsonb(rows[0]["data"])]
 
 
 def get_data_inventory() -> list[dict[str, Any]]:
-    return _df_to_records(_load_csv(_path("data_inventory.csv")))
+    rows = _query("SELECT data FROM model_kv WHERE key='data_inventory'")
+    if not rows:
+        return []
+    return [_clean_row(r) for r in _parse_jsonb(rows[0]["data"])]
 
 
 def get_pinning_audit() -> list[dict[str, Any]]:
-    return _df_to_records(_load_csv(_path("pinning_audit_findings.csv")))
+    rows = _query("SELECT data FROM model_kv WHERE key='pinning_audit'")
+    if not rows:
+        return []
+    return [_clean_row(r) for r in _parse_jsonb(rows[0]["data"])]
 
 
-# ─── Summary / freshness ──────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Status / freshness
+# ---------------------------------------------------------------------------
 
 def get_status() -> dict[str, Any]:
-    """Lightweight health check of the data layer itself. Useful as a smoke
-    endpoint and as MCP's default 'what's there'."""
-    root = project_dir()
-    files = {}
-    for fname in list(MASTER_FILES.values()) + list(HYPOTHESIS_FILES.values()) + [
-        "weights.csv", "weight_history_wf365_y_60.csv", "weight_history_wf365_y_30.csv",
-        "health_check.csv", "shadow_state.csv", "raw_data_export.csv",
-        "thresholds.csv", "data_inventory.csv", "export_manifest.json",
-    ]:
-        p = root / fname
-        files[fname] = {
-            "present": p.exists(),
-            "mtime_utc": pd.Timestamp.utcfromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%dT%H:%M:%S") if p.exists() else None,
-            "size_bytes": p.stat().st_size if p.exists() else None,
-        }
     try:
-        latest = get_today("wf365")
-        latest_date = latest.get("date")
-        latest_position = latest.get("position")
-        latest_regime = latest.get("regime")
+        today = get_today("wf365")
+        latest_date     = today.get("date")
+        latest_position = today.get("position")
+        latest_regime   = today.get("regime")
     except Exception as e:
-        latest_date, latest_position, latest_regime = None, None, f"error: {e}"
+        latest_date = latest_position = None
+        latest_regime = f"error: {e}"
+
+    try:
+        kv = _query("SELECT key, written_at FROM model_kv ORDER BY key")
+        tables = {r["key"]: r["written_at"] for r in kv}
+    except Exception:
+        tables = {}
 
     return {
-        "project_dir": str(root),
-        "latest_date": latest_date,
-        "latest_position": latest_position,
-        "latest_regime": latest_regime,
-        "files": files,
+        "source":           "postgres",
+        "latest_date":      latest_date,
+        "latest_position":  latest_position,
+        "latest_regime":    latest_regime,
+        "tables":           tables,
     }
