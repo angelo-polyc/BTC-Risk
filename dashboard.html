@@ -886,14 +886,31 @@
     font-size: 10.5px;
     color: var(--ink-soft);
   }
-  #mom-token-select {
-    font-family: inherit;
-    font-size: 10.5px;
+  .mom-token-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     padding: 2px 6px;
-    border: 1px solid var(--rule);
-    background: var(--bg);
-    color: var(--ink);
+    border: 1px solid;
+    border-radius: 2px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    cursor: default;
+    user-select: none;
   }
+  .mom-token-chip button {
+    border: none;
+    background: none;
+    padding: 0 0 0 2px;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+    color: inherit;
+    opacity: 0.7;
+  }
+  .mom-token-chip button:hover { opacity: 1; }
 </style>
 </head>
 <body>
@@ -1118,8 +1135,10 @@
         <button data-view="chart">Chart</button>
       </div>
       <div class="mom-token-select-wrap" id="mom-token-select-wrap" style="display:none;margin-left:8px">
-        <span>Token:</span>
-        <select id="mom-token-select"></select>
+        <div id="mom-token-chips" style="display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap;"></div>
+        <select id="mom-token-add" style="margin-left:6px;font-family:inherit;font-size:10.5px;padding:2px 6px;border:1px solid var(--rule);background:var(--bg);color:var(--ink);">
+          <option value="">+ Add token</option>
+        </select>
       </div>
       <div class="actions" style="margin-left:8px">
         <button id="btn-mom-refresh" type="button">↻ REFRESH</button>
@@ -1140,7 +1159,7 @@
     </div>
     <div class="mom-chart-divider"></div>
     <div id="mom-chart-rank-block" class="chart-block" style="margin-top:0">
-      <div class="mom-chart-label">Momentum rank_pct · 14d MA</div>
+      <div class="mom-chart-label">Momentum rank_pct · 7d MA</div>
       <canvas id="mom-rank-canvas" style="display:block;width:100%"></canvas>
     </div>
   </div>
@@ -3111,7 +3130,21 @@ let _momHistory     = null;
 let _momPrices      = null;
 let _momViewMode    = "screener";  // "screener" | "heatmap" | "chart"
 let _momQ5Only      = true;
-let _momChartToken  = "BTC";
+const MOM_TOKEN_COLORS = [
+  "#f7931a",  // BTC — bitcoin orange (index 0, reserved)
+  "#3498db",  // blue
+  "#2ecc71",  // green
+  "#9b59b6",  // purple
+  "#e74c3c",  // red
+  "#f39c12",  // yellow-orange
+  "#1abc9c",  // teal
+  "#e91e63",  // pink
+  "#16a085",  // dark teal
+  "#8e44ad",  // dark purple
+];
+let _momSelectedTokens = ["BTC"];  // BTC always first
+let _momTokenColorMap  = { BTC: "#f7931a" };
+let _momColorIdx = 1;  // next color index (0 is BTC orange)
 let _momHeatmapDrawn = false;
 let _momHeatmapHoverSetup = false;
 let _momHeatmapLayout = null;
@@ -3204,9 +3237,8 @@ async function loadMomentumPrices() {
 }
 
 async function loadMomentumChart() {
-  const chartWrap   = document.getElementById("mom-chart-wrap");
   const loadingDiv  = document.getElementById("mom-chart-loading");
-  if (_momHistory && _momPrices) { renderMomentumChart(_momChartToken); return; }
+  if (_momHistory && _momPrices) { renderMomentumChart(); return; }
   loadingDiv.style.display = "";
   try {
     const promises = [];
@@ -3214,7 +3246,7 @@ async function loadMomentumChart() {
     if (!_momPrices)  promises.push(loadMomentumPrices());
     await Promise.all(promises);
     loadingDiv.style.display = "none";
-    renderMomentumChart(_momChartToken);
+    renderMomentumChart();
   } catch(e) {
     loadingDiv.style.display = "none";
     document.getElementById("mom-chart-price-block").innerHTML =
@@ -3224,12 +3256,45 @@ async function loadMomentumChart() {
 }
 
 function _populateMomTokenSelect(scores) {
-  const sel = document.getElementById("mom-token-select");
-  if (!sel) return;
+  const addSel = document.getElementById("mom-token-add");
+  if (!addSel) return;
   const syms = [...new Set(scores.map(s => s.symbol))].sort();
-  sel.innerHTML = syms.map(s =>
-    `<option value="${s}"${s === _momChartToken ? " selected" : ""}>${s}</option>`
-  ).join("");
+  addSel.innerHTML = '<option value="">+ Add token</option>' +
+    syms.map(s => `<option value="${s}">${s}</option>`).join("");
+  _renderTokenChips();
+}
+
+function _renderTokenChips() {
+  const container = document.getElementById("mom-token-chips");
+  if (!container) return;
+  container.innerHTML = _momSelectedTokens.map(sym => {
+    const color = _momTokenColorMap[sym] || "#545450";
+    const isBtc = sym === "BTC";
+    const btn = isBtc
+      ? `<button class="mom-chip-toggle" title="Toggle BTC" data-sym="BTC">&#11044;</button>`
+      : `<button class="mom-chip-remove" title="Remove ${sym}" data-sym="${sym}">&times;</button>`;
+    return `<span class="mom-token-chip" data-sym="${sym}" style="border-color:${color};color:${color}">${sym}${btn}</span>`;
+  }).join("");
+
+  /* Wire remove/toggle buttons */
+  container.querySelectorAll(".mom-chip-remove").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const sym = btn.dataset.sym;
+      _momSelectedTokens = _momSelectedTokens.filter(s => s !== sym);
+      _renderTokenChips();
+      if (_momViewMode === "chart") renderMomentumChart();
+    });
+  });
+  container.querySelectorAll(".mom-chip-toggle").forEach(btn => {
+    btn.addEventListener("click", () => {
+      /* BTC toggle: dim the chip and exclude from render */
+      const chip = btn.closest(".mom-token-chip");
+      const isOff = chip.style.opacity === "0.35";
+      chip.style.opacity = isOff ? "" : "0.35";
+      btn.title = isOff ? "Toggle BTC" : "BTC hidden";
+      if (_momViewMode === "chart") renderMomentumChart();
+    });
+  });
 }
 
 /* ─── View 1: Screener table ─── */
@@ -3337,7 +3402,7 @@ function renderMomentumScreener() {
     </table>`;
 }
 
-/* ─── View 2: Heatmap (14d MA of rank_pct) ─── */
+/* ─── View 2: Heatmap (7d MA of rank_pct) ─── */
 
 const MOM_HM_CELL_H  = 16;
 const MOM_HM_LABEL_W = 60;
@@ -3376,8 +3441,8 @@ function renderMomentumHeatmap() {
     .sort((a, b) => b.rank - a.rank)
     .slice(0, MOM_HM_MAX_TOKENS);
 
-  /* Compute 14-day rolling mean per selected token */
-  const MA_WINDOW = 14;
+  /* Compute 7-day rolling mean per selected token */
+  const MA_WINDOW = 7;
   const tokenMA = order.map(({ i }) => {
     const raw = dates.map((_, di) => rank_pcts[di][i]);
     return smaArray(raw, MA_WINDOW);
@@ -3476,7 +3541,7 @@ function _setupMomHeatmapHover() {
     const ma   = layout.tokenMA[ri][ci];
     const rawStr = raw  != null ? raw.toFixed(3)  : "—";
     const maStr  = ma   != null ? ma.toFixed(3)   : "—";
-    tooltip.textContent = `${sym}  ·  ${date}\nrank_pct  ${rawStr}\n14d MA    ${maStr}`;
+    tooltip.textContent = `${sym}  ·  ${date}\nrank_pct  ${rawStr}\n 7d MA    ${maStr}`;
     tooltip.style.display = "block";
     tooltip.style.left = (e.clientX + 14) + "px";
     tooltip.style.top  = (e.clientY  - 8) + "px";
@@ -3486,196 +3551,193 @@ function _setupMomHeatmapHover() {
 
 /* ─── View 3: Price + rank_pct chart ─── */
 
-function renderMomentumChart(token) {
-  _momChartToken = token;
+function renderMomentumChart() {
   const priceCanvas = document.getElementById("mom-price-canvas");
   const rankCanvas  = document.getElementById("mom-rank-canvas");
   if (!_momPrices || !_momHistory) return;
 
+  /* Determine visible tokens — BTC chip may be dimmed/toggled */
+  const btcChip = document.querySelector(".mom-token-chip[data-sym='BTC']");
+  const btcVisible = !btcChip || btcChip.style.opacity !== "0.35";
+  const visibleTokens = _momSelectedTokens.filter(sym => sym !== "BTC" || btcVisible);
+  if (!visibleTokens.length) return;
+
   const { dates: pDates, tokens: pTokens, prices: pData } = _momPrices;
   const { dates: hDates, tokens: hTokens, rank_pcts }      = _momHistory;
 
-  const pTi = pTokens.indexOf(token);
-  const hTi = hTokens.indexOf(token);
-
-  /* Merge to common dates from price series (365 days) */
   const allDates = pDates.slice();
-  const priceVals = allDates.map((_, di) => pTi >= 0 ? pData[di][pTi] : null);
-  const rankRaw   = allDates.map(d => {
-    const hi = hDates.indexOf(d);
-    return (hi >= 0 && hTi >= 0) ? rank_pcts[hi][hTi] : null;
-  });
-  const rankMA = smaArray(rankRaw, 14);
+  const nDates   = allDates.length;
 
-  /* Valid price range for log scale */
-  const validPrices = priceVals.filter(v => v != null && v > 0);
-  if (!validPrices.length) {
+  /* Build per-token price and rank series */
+  const tokenSeries = visibleTokens.map(sym => {
+    const pTi = pTokens.indexOf(sym);
+    const hTi = hTokens.indexOf(sym);
+    const color = _momTokenColorMap[sym] || "#545450";
+    const priceVals = allDates.map((_, di) => pTi >= 0 && pData[di][pTi] != null ? pData[di][pTi] : null);
+    const rankRaw   = allDates.map(d => {
+      const hi = hDates.indexOf(d);
+      return (hi >= 0 && hTi >= 0 && rank_pcts[hi][hTi] != null) ? rank_pcts[hi][hTi] : null;
+    });
+    const rankMA = smaArray(rankRaw, 7);
+    return { sym, color, priceVals, rankRaw, rankMA };
+  });
+
+  /* Global price bounds across all visible tokens */
+  const allPriceVals = tokenSeries.flatMap(s => s.priceVals.filter(v => v != null && v > 0));
+  if (!allPriceVals.length) {
     document.getElementById("mom-chart-price-block").innerHTML =
-      `<div class="placeholder">no price data for ${token}</div>`;
+      `<div class="placeholder">no price data for selected tokens</div>`;
     return;
   }
 
   const dpr = window.devicePixelRatio || 1;
-  const CW  = Math.round((priceCanvas.parentElement.clientWidth || 1200));
+  const CW  = Math.max(300, priceCanvas.parentElement.getBoundingClientRect().width || 1200);
+  const padL = 62, padR = 24, padT = 14, padB = 18;
 
-  /* Top panel: price (log) */
-  const pH = 280, padL = 60, padR = 24, padT = 14, padB = 12;
-  priceCanvas.style.height  = pH + "px";
+  /* ── TOP PANEL: price (log scale) ── */
+  const pMin = Math.min(...allPriceVals);
+  const pMax = Math.max(...allPriceVals);
+  const logMin = Math.log(pMin * 0.95), logMax = Math.log(pMax * 1.05);
+  const pH = 280;
+  priceCanvas.style.height = pH + "px";
   priceCanvas.width  = Math.round(CW * dpr);
   priceCanvas.height = Math.round(pH * dpr);
-  {
-    const ctx = priceCanvas.getContext("2d");
-    ctx.scale(dpr, dpr);
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#faf8f3";
-    ctx.fillRect(0, 0, CW, pH);
 
-    const pMin = Math.min(...validPrices), pMax = Math.max(...validPrices);
-    const logMin = Math.log(pMin * 0.97), logMax = Math.log(pMax * 1.03);
-    const x0 = padL, x1 = CW - padR, y0 = padT, y1 = pH - padB;
-    const scaleX = (di) => x0 + (di / (allDates.length - 1 || 1)) * (x1 - x0);
-    const scaleYP = (p) => {
-      if (!p || p <= 0) return y1;
-      return y1 - (Math.log(p) - logMin) / (logMax - logMin) * (y1 - y0);
-    };
+  const pCtx = priceCanvas.getContext("2d");
+  pCtx.scale(dpr, dpr);
+  pCtx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#faf8f3";
+  pCtx.fillRect(0, 0, CW, pH);
 
-    /* Grid lines */
-    const span  = pMax / pMin;
-    const step  = span > 8 ? 2 : (span > 3 ? 1.5 : 1.25);
-    const ticks = [];
-    for (let v = Math.pow(step, Math.floor(Math.log(pMin)/Math.log(step))); v <= pMax * 1.01; v *= step) {
-      if (v >= pMin * 0.99) ticks.push(v);
-    }
-    ctx.strokeStyle = "#ebe6d8"; ctx.lineWidth = 0.5;
-    ticks.forEach(t => {
-      const y = scaleYP(t);
-      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
-      ctx.font = "9px 'JetBrains Mono',monospace";
-      ctx.fillStyle = "#545450"; ctx.textAlign = "right";
-      const lab = t >= 1e9 ? (t/1e9).toFixed(1)+"B" : t >= 1e6 ? (t/1e6).toFixed(1)+"M" : t >= 1e3 ? (t/1e3).toFixed(0)+"K" : t.toFixed(0);
-      ctx.fillText(lab, x0 - 4, y + 3);
-    });
+  const x0 = padL, x1 = CW - padR, y0 = padT, y1 = pH - padB;
+  const scaleX  = di => x0 + (di / (nDates - 1 || 1)) * (x1 - x0);
+  const scaleYP = p  => (p > 0) ? y1 - (Math.log(p) - logMin) / (logMax - logMin) * (y1 - y0) : y1;
 
-    /* Price line */
-    const isBTC = token === "BTC";
-    ctx.strokeStyle = isBTC ? "#f7931a" : "#545450";
-    ctx.lineWidth = 1.5; ctx.lineJoin = "round";
-    ctx.beginPath();
+  /* Y-axis ticks */
+  const magnitude = Math.pow(10, Math.floor(Math.log10(pMin)));
+  const candidates = [1, 2, 2.5, 5, 10].map(m => m * magnitude);
+  let tickStep = candidates.find(s => (pMax - pMin) / s >= 3 && (pMax - pMin) / s <= 8) || magnitude;
+  const ticks = [];
+  const tickStart = Math.ceil(pMin / tickStep) * tickStep;
+  for (let t = tickStart; t <= pMax * 1.001; t += tickStep) {
+    if (t > 0 && t >= pMin * 0.99) ticks.push(t);
+  }
+  pCtx.strokeStyle = "#ebe6d8"; pCtx.lineWidth = 0.5;
+  ticks.forEach(t => {
+    const y = scaleYP(t);
+    pCtx.beginPath(); pCtx.moveTo(x0, y); pCtx.lineTo(x1, y); pCtx.stroke();
+    const lab = t <= 0 ? "0" : t >= 1e9 ? (t/1e9).toFixed(1)+"B" : t >= 1e6 ? (t/1e6).toFixed(1)+"M" : t >= 1e3 ? (t/1e3).toFixed(0)+"K" : t.toFixed(2);
+    pCtx.font = "9px 'JetBrains Mono',monospace";
+    pCtx.fillStyle = "#545450"; pCtx.textAlign = "right";
+    pCtx.fillText(lab, x0 - 4, y + 3);
+  });
+
+  /* Price lines — one per token */
+  tokenSeries.forEach(({ priceVals, color }) => {
+    pCtx.strokeStyle = color; pCtx.lineWidth = 1.5; pCtx.lineJoin = "round";
+    pCtx.beginPath();
     let started = false;
     allDates.forEach((_, di) => {
       const v = priceVals[di];
       if (!v || v <= 0) { started = false; return; }
       const x = scaleX(di), y = scaleYP(v);
-      if (!started) { ctx.moveTo(x, y); started = true; }
-      else ctx.lineTo(x, y);
+      if (!started) { pCtx.moveTo(x, y); started = true; }
+      else pCtx.lineTo(x, y);
     });
-    ctx.stroke();
+    pCtx.stroke();
+  });
 
-    /* Date labels on top panel too */
-    ctx.font = "8.5px 'JetBrains Mono',monospace";
-    ctx.fillStyle = "#8a8780"; ctx.textAlign = "center";
-    const labelStep = Math.max(1, Math.floor(allDates.length / 8));
-    allDates.forEach((d, di) => {
-      if (di % labelStep !== 0) return;
-      ctx.fillText(d.slice(5), scaleX(di), y1 + 10);
+  /* X-axis date labels */
+  pCtx.font = "8.5px 'JetBrains Mono',monospace";
+  pCtx.fillStyle = "#8a8780"; pCtx.textAlign = "center";
+  const labelStep = Math.max(1, Math.floor(nDates / 8));
+  allDates.forEach((d, di) => {
+    if (di % labelStep !== 0) return;
+    pCtx.fillText(d.slice(5), scaleX(di), y1 + 12);
+  });
+
+  /* Legend */
+  if (tokenSeries.length > 1) {
+    let lx = x0 + 4;
+    tokenSeries.forEach(({ sym, color }) => {
+      pCtx.fillStyle = color; pCtx.font = "bold 9px 'JetBrains Mono',monospace"; pCtx.textAlign = "left";
+      pCtx.fillText(sym, lx, y0 + 10);
+      lx += pCtx.measureText(sym).width + 10;
     });
   }
 
-  /* Bottom panel: rank_pct */
+  /* ── BOTTOM PANEL: rank_pct 7d MA ── */
   const rH = 160;
-  rankCanvas.style.height  = rH + "px";
+  rankCanvas.style.height = rH + "px";
   rankCanvas.width  = Math.round(CW * dpr);
   rankCanvas.height = Math.round(rH * dpr);
-  {
-    const ctx = rankCanvas.getContext("2d");
-    ctx.scale(dpr, dpr);
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#faf8f3";
-    ctx.fillRect(0, 0, CW, rH);
 
-    const x0 = padL, x1 = CW - padR, y0 = 8, y1 = rH - 28;
-    const scaleX  = (di) => x0 + (di / (allDates.length - 1 || 1)) * (x1 - x0);
-    const scaleYR = (v)  => y1 - (v / 1.0) * (y1 - y0);
-    const Q5_Y    = scaleYR(0.80);
+  const rCtx = rankCanvas.getContext("2d");
+  rCtx.scale(dpr, dpr);
+  rCtx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#faf8f3";
+  rCtx.fillRect(0, 0, CW, rH);
 
-    /* Grid */
-    ctx.strokeStyle = "#ebe6d8"; ctx.lineWidth = 0.5;
-    [0, 0.25, 0.5, 0.75, 1.0].forEach(v => {
-      const y = scaleYR(v);
-      ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
-      ctx.font = "9px 'JetBrains Mono',monospace";
-      ctx.fillStyle = "#545450"; ctx.textAlign = "right";
-      ctx.fillText(v.toFixed(2), x0 - 4, y + 3);
-    });
+  const rx0 = padL, rx1 = CW - padR, ry0 = 8, ry1 = rH - 22;
+  const scaleXR  = di => rx0 + (di / (nDates - 1 || 1)) * (rx1 - rx0);
+  const scaleYR  = v  => ry1 - (v / 1.0) * (ry1 - ry0);
+  const Q5_Y     = scaleYR(0.80);
 
-    /* Q5 threshold line */
-    ctx.strokeStyle = "#2e6a3b"; ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath(); ctx.moveTo(x0, Q5_Y); ctx.lineTo(x1, Q5_Y); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.font = "8.5px 'JetBrains Mono',monospace";
-    ctx.fillStyle = "#2e6a3b"; ctx.textAlign = "left";
-    ctx.fillText("0.80 Q5", x1 + 3, Q5_Y + 3);
+  /* Grid */
+  rCtx.strokeStyle = "#ebe6d8"; rCtx.lineWidth = 0.5;
+  [0, 0.25, 0.5, 0.75, 1.0].forEach(v => {
+    const y = scaleYR(v);
+    rCtx.beginPath(); rCtx.moveTo(rx0, y); rCtx.lineTo(rx1, y); rCtx.stroke();
+    rCtx.font = "9px 'JetBrains Mono',monospace";
+    rCtx.fillStyle = "#545450"; rCtx.textAlign = "right";
+    rCtx.fillText((v * 100).toFixed(0) + "%", rx0 - 4, y + 3);
+  });
 
-    /* Raw rank_pct line (faint) */
-    ctx.strokeStyle = "#c0bbad"; ctx.lineWidth = 0.75; ctx.lineJoin = "round";
-    ctx.globalAlpha = 0.6;
-    ctx.beginPath();
+  /* Q5 threshold line */
+  rCtx.strokeStyle = "#2e6a3b"; rCtx.lineWidth = 1;
+  rCtx.setLineDash([4, 4]);
+  rCtx.beginPath(); rCtx.moveTo(rx0, Q5_Y); rCtx.lineTo(rx1, Q5_Y); rCtx.stroke();
+  rCtx.setLineDash([]);
+  rCtx.font = "8.5px 'JetBrains Mono',monospace";
+  rCtx.fillStyle = "#2e6a3b"; rCtx.textAlign = "left";
+  rCtx.fillText("Q5 80%", rx1 + 3, Q5_Y + 3);
+
+  /* Rank lines — one per token */
+  tokenSeries.forEach(({ rankRaw, rankMA, color }) => {
+    /* Raw (faint) */
+    rCtx.strokeStyle = color; rCtx.lineWidth = 0.75; rCtx.lineJoin = "round";
+    rCtx.globalAlpha = 0.3;
+    rCtx.beginPath();
     let started = false;
     allDates.forEach((_, di) => {
       const v = rankRaw[di];
       if (v == null) { started = false; return; }
-      const x = scaleX(di), y = scaleYR(v);
-      if (!started) { ctx.moveTo(x, y); started = true; }
-      else ctx.lineTo(x, y);
+      const x = scaleXR(di), y = scaleYR(v);
+      if (!started) { rCtx.moveTo(x, y); started = true; }
+      else rCtx.lineTo(x, y);
     });
-    ctx.stroke();
-    ctx.globalAlpha = 1;
+    rCtx.stroke();
+    rCtx.globalAlpha = 1;
 
-    /* 14d MA with color above/below Q5 */
-    ctx.lineWidth = 2.0; ctx.lineJoin = "round";
+    /* 7d MA (solid) */
+    rCtx.strokeStyle = color; rCtx.lineWidth = 2.0; rCtx.lineJoin = "round";
+    rCtx.beginPath();
     started = false;
-    let prevX = null, prevY = null, prevMA = null;
     allDates.forEach((_, di) => {
       const v = rankMA[di];
-      if (v == null) { started = false; prevX = null; prevY = null; prevMA = null; return; }
-      const x = scaleX(di), y = scaleYR(v);
-      if (!started) {
-        ctx.beginPath(); ctx.moveTo(x, y);
-        ctx.strokeStyle = v >= 0.80 ? "#2e6a3b" : "#545450";
-        started = true;
-      } else {
-        /* Change color segment-by-segment when crossing 0.80 */
-        const newColor = v >= 0.80 ? "#2e6a3b" : "#545450";
-        const oldColor = prevMA != null && prevMA >= 0.80 ? "#2e6a3b" : "#545450";
-        if (newColor !== oldColor && prevX != null) {
-          ctx.lineTo(x, y); ctx.stroke();
-          ctx.beginPath(); ctx.strokeStyle = newColor; ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      }
-      prevX = x; prevY = y; prevMA = v;
+      if (v == null) { started = false; return; }
+      const x = scaleXR(di), y = scaleYR(v);
+      if (!started) { rCtx.moveTo(x, y); started = true; }
+      else rCtx.lineTo(x, y);
     });
-    if (started) ctx.stroke();
+    rCtx.stroke();
+  });
 
-    /* X-axis labels */
-    ctx.font = "8.5px 'JetBrains Mono',monospace";
-    ctx.fillStyle = "#8a8780"; ctx.textAlign = "center";
-    const labelStep = Math.max(1, Math.floor(allDates.length / 8));
-    allDates.forEach((d, di) => {
-      if (di % labelStep !== 0) return;
-      const x = scaleX(di);
-      ctx.beginPath(); ctx.strokeStyle = "#8a8780"; ctx.lineWidth = 0.5;
-      ctx.moveTo(x, y1); ctx.lineTo(x, y1 + 3); ctx.stroke();
-      ctx.fillStyle = "#545450";
-      ctx.fillText(d.slice(5), x, y1 + 13);
-      const yr = d.slice(0, 4);
-      if (d.slice(5) <= "01-15" && d.slice(5) >= "01-01") {
-        ctx.fillStyle = "#0e0e0e"; ctx.font = "bold 8.5px 'JetBrains Mono',monospace";
-        ctx.fillText(yr, x, y1 + 23);
-        ctx.font = "8.5px 'JetBrains Mono',monospace";
-      }
-    });
-  }
+  /* X-axis date labels bottom */
+  rCtx.font = "8.5px 'JetBrains Mono',monospace";
+  rCtx.fillStyle = "#8a8780"; rCtx.textAlign = "center";
+  allDates.forEach((d, di) => {
+    if (di % labelStep !== 0) return;
+    rCtx.fillText(d.slice(5), scaleXR(di), ry1 + 12);
+  });
 }
 
 /* ─── Toggle wiring ─── */
@@ -3714,10 +3776,19 @@ function setupMomentumToggles() {
   });
 
   /* Token selector */
-  const tokenSel = document.getElementById("mom-token-select");
-  tokenSel.addEventListener("change", () => {
-    _momChartToken = tokenSel.value;
-    renderMomentumChart(_momChartToken);
+  const addSel = document.getElementById("mom-token-add");
+  addSel.addEventListener("change", () => {
+    const sym = addSel.value;
+    if (!sym || _momSelectedTokens.includes(sym)) { addSel.value = ""; return; }
+    /* Assign a color */
+    if (!_momTokenColorMap[sym]) {
+      _momTokenColorMap[sym] = MOM_TOKEN_COLORS[_momColorIdx % MOM_TOKEN_COLORS.length];
+      _momColorIdx++;
+    }
+    _momSelectedTokens.push(sym);
+    addSel.value = "";
+    _renderTokenChips();
+    if (_momViewMode === "chart") renderMomentumChart();
   });
 }
 
