@@ -263,7 +263,12 @@ async def get_all_zscores(pool: asyncpg.Pool) -> list[dict]:
             JOIN zscores z ON z.token_id = t.id
             ORDER BY t.rank ASC NULLS LAST
         """)
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["zscores"] = {m: d.pop(m) for m in ZSCORE_METRICS}
+        out.append(d)
+    return out
 
 
 # ---------------------------------------------------------------------------
