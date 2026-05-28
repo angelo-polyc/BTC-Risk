@@ -3541,15 +3541,14 @@ function renderMomentumPreQ5() {
     </div>`;
 
     const compHtml = `<div class="mom-comp-bars">
-      ${compBar(r.res14_z, true, "res14_z")}
-      ${compBar(r.raw14_z, true, "raw14_z")}
-      ${compBar(r.raw7_z,  true, "raw7_z")}
-      ${compBar(r.cvd_pct, false,"cvd_pct")}
+      ${compBar(r.pm_rel7,  true,  "BTC-relative 7d return")}
+      ${compBar(r.pm_cvd7,  false, "CVD 7d taker buy pct")}
+      ${compBar(r.pm_accel, true,  "Composite score Δ vs 7d ago")}
+      ${compBar(r.pm_fund,  true,  "Short positioning (positive = crowded shorts)")}
+      ${compBar(r.pm_oi,    true,  "OI 14d growth")}
     </div>`;
 
     let flagsHtml = "";
-    if (r.cvd_pct != null && r.cvd_pct < 0.5)
-      flagsHtml += `<span class="mom-flag cvd-warn" data-tooltip="Net taker sell pressure over the past 7 days. Distribution risk — consider reduced sizing.">CVD↓</span>`;
     if (r.ls_ext_short === true)
       flagsHtml += `<span class="mom-flag ls-ext" data-tooltip="Crowded short positioning relative to 60-day history. Potential short squeeze amplifier.">⚡</span>`;
     if (rawDown)
@@ -3570,16 +3569,17 @@ function renderMomentumPreQ5() {
     </div>
     <table class="mom-table">
       <colgroup>
-        <col style="width:10%"><col style="width:18%"><col style="width:14%"><col style="width:42%"><col style="width:16%">
+        <col style="width:9%"><col style="width:16%"><col style="width:12%"><col style="width:47%"><col style="width:16%">
       </colgroup>
       <thead><tr>
         <th>Token</th><th>Pre-mom rank</th><th>Current rank</th>
         <th style="padding-left:0">
           <div style="display:flex;gap:0;font-weight:400;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:0.02em;color:var(--ink-softer)">
-            <span style="flex:1;text-align:center">res14_z</span>
-            <span style="flex:1;text-align:center">raw14_z</span>
-            <span style="flex:1;text-align:center">raw7_z</span>
-            <span style="flex:1;text-align:center">cvd_pct</span>
+            <span style="flex:1;text-align:center">BTC-rel</span>
+            <span style="flex:1;text-align:center">CVD 7d</span>
+            <span style="flex:1;text-align:center">accel</span>
+            <span style="flex:1;text-align:center">short</span>
+            <span style="flex:1;text-align:center">OI</span>
           </div>
         </th>
         <th>Flags</th>
