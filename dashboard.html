@@ -3994,7 +3994,7 @@ const _SIGNAL_META = {
   cvd:     { label: "CVD ts-z (14d rolling, vs 60d history)",        threshold: 2.0,  threshLo: null,  field: "cvd_tsz",          color: "#3498db" },
   flow:    { label: "CVD ts-z (buying pressure vs own history)",      threshold: 2.0,  threshLo: null,  field: "cvd_tsz",          color: "#2ecc71" },
   flip:    { label: "CVD 7d net flow (selling → buying transition)",  threshold: 0,    threshLo: null,  field: "cvd_7d_sum",        color: "#3498db" },
-  shorts:  { label: "Funding ts-z (vs own 60d history)",             threshold: null, threshLo: -1.0,  field: "fund_tsz",          color: "#b5381f" },
+  shorts:  { label: "L/S account ratio ts-z — negative = more short accounts than usual (vs own 60d history)", threshold: null, threshLo: -1.0, field: "ls_global_tsz", color: "#b5381f" },
   raw:     { label: "14d price return",                               threshold: 0,    threshLo: null,  field: "raw_14d",           color: "#545450" },
   // component bars
   res14:   { label: "14d return (residual vs BTC-beta)",              threshold: 0,    threshLo: null,  field: "raw_14d",           color: "#9b59b6" },
