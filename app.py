@@ -189,6 +189,72 @@ async def prices(x_api_key: str | None = None, days: int = 430):
     }
 
 
+@app.get("/signal_history")
+async def signal_history(symbol: str, days: int = 90, x_api_key: str | None = None):
+    _auth(x_api_key)
+    import pandas as pd, numpy as np
+
+    fetch_days = days + 75
+
+    async def panel(name: str) -> "pd.Series":
+        raw = await db.get_raw_panel(_pool, name, fetch_days)
+        pts = raw.get(symbol.upper(), [])
+        if not pts:
+            return pd.Series(dtype=float)
+        s = pd.Series({p["d"]: float(p["v"]) for p in pts})
+        s.index = pd.DatetimeIndex(s.index)
+        return s.sort_index()
+
+    price = await panel("price")
+    buy   = await panel("taker_buy")
+    sell  = await panel("taker_sell")
+    fund  = await panel("funding")
+
+    cutoff = pd.Timestamp.now().normalize() - pd.Timedelta(days=days - 1)
+
+    def ts(s: "pd.Series") -> "pd.Series":
+        return s[s.index >= cutoff] if not s.empty else s
+
+    def fmt(s: "pd.Series") -> list:
+        return [round(float(v), 5) if pd.notna(v) else None for v in s]
+
+    # CVD ts-z
+    cvd_tsz = pd.Series(dtype=float)
+    cvd_7d  = pd.Series(dtype=float)
+    if not buy.empty and not sell.empty:
+        net     = (buy - sell).fillna(0)
+        c14     = net.rolling(14, min_periods=7).sum()
+        cvd_tsz = (c14 - c14.rolling(60, min_periods=30).mean()) / c14.rolling(60, min_periods=30).std().replace(0, np.nan)
+        cvd_7d  = net.rolling(7, min_periods=4).sum()
+
+    # Funding ts-z
+    fund_tsz = pd.Series(dtype=float)
+    if not fund.empty:
+        fund_tsz = (fund - fund.rolling(60, min_periods=30).mean()) / fund.rolling(60, min_periods=30).std().replace(0, np.nan)
+
+    # Raw 14d return
+    raw14 = pd.Series(dtype=float)
+    if not price.empty:
+        raw14 = price / price.shift(14) - 1
+
+    # Align all to a common date index
+    all_series = [ts(cvd_tsz), ts(cvd_7d), ts(fund_tsz), ts(raw14)]
+    idx = sorted(set().union(*[set(s.index) for s in all_series if not s.empty]))
+    idx = pd.DatetimeIndex(idx)
+
+    def aligned(s: "pd.Series") -> list:
+        return fmt(s.reindex(idx)) if not s.empty else [None] * len(idx)
+
+    return JSONResponse(content={
+        "symbol":     symbol.upper(),
+        "dates":      [str(d.date()) for d in idx],
+        "cvd_tsz":    aligned(ts(cvd_tsz)),
+        "cvd_7d_sum": aligned(ts(cvd_7d)),
+        "fund_tsz":   aligned(ts(fund_tsz)),
+        "raw_14d":    aligned(ts(raw14)),
+    })
+
+
 @app.get("/debug")
 async def debug(x_api_key: str | None = None):
     """Reports DB counts and CG map size."""
