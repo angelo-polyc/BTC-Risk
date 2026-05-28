@@ -202,6 +202,12 @@ def compute_scores(
                                 else None,
             "pre_mom_score":    round(float(pre_score[sym]), 4)    if sym in pre_score.index and pd.notna(pre_score.get(sym)) else None,
             "pre_mom_rank_pct": round(float(pre_rank[sym]),  4)    if sym in pre_rank.index  and pd.notna(pre_rank.get(sym))  else None,
+            # Individual pre-momentum signal components (for Pre Momentum screener table)
+            "pm_rel7":  round(float(rel_7d_xs[sym]),     3) if sym in rel_7d_xs.index     and pd.notna(rel_7d_xs.get(sym))     else None,
+            "pm_cvd7":  round(float(cvd_7d_pct_s[sym]),  3) if sym in cvd_7d_pct_s.index  and pd.notna(cvd_7d_pct_s.get(sym))  else None,
+            "pm_accel": round(float(comp_accel_xs[sym]),  3) if sym in comp_accel_xs.index and pd.notna(comp_accel_xs.get(sym)) else None,
+            "pm_fund":  round(-float(fund_tsz_l[sym]),   3) if funding is not None and not funding.empty and sym in fund_tsz_l.index and pd.notna(fund_tsz_l.get(sym)) else None,
+            "pm_oi":    round(float(oi_xs[sym]),          3) if sym in oi_xs.index          and pd.notna(oi_xs.get(sym))          else None,
         }
         for sym in latest_scores.index
     ]
@@ -394,6 +400,11 @@ async def write_scores_to_db(pool, scores_dict: dict) -> None:
             "ls_ext_short":     s.get("ls_ext_short"),
             "pre_mom_score":    s.get("pre_mom_score"),
             "pre_mom_rank_pct": s.get("pre_mom_rank_pct"),
+            "pm_rel7":  s.get("pm_rel7"),
+            "pm_cvd7":  s.get("pm_cvd7"),
+            "pm_accel": s.get("pm_accel"),
+            "pm_fund":  s.get("pm_fund"),
+            "pm_oi":    s.get("pm_oi"),
         })
     await _db.upsert_scores_batch(pool, score_rows)
 
