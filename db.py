@@ -72,6 +72,8 @@ async def init_db(pool: asyncpg.Pool) -> None:
         # Migrate existing tables — ADD COLUMN IF NOT EXISTS is idempotent
         await conn.execute("ALTER TABLE mom_scores ADD COLUMN IF NOT EXISTS pre_mom_score REAL")
         await conn.execute("ALTER TABLE mom_scores ADD COLUMN IF NOT EXISTS pre_mom_rank_pct REAL")
+        await conn.execute("ALTER TABLE mom_scores ADD COLUMN IF NOT EXISTS cvd_tsz_high BOOLEAN")
+        await conn.execute("ALTER TABLE mom_scores ADD COLUMN IF NOT EXISTS cvd_flip     BOOLEAN")
         await conn.execute("ALTER TABLE mom_scores ADD COLUMN IF NOT EXISTS pm_rel7  REAL")
         await conn.execute("ALTER TABLE mom_scores ADD COLUMN IF NOT EXISTS pm_cvd7  REAL")
         await conn.execute("ALTER TABLE mom_scores ADD COLUMN IF NOT EXISTS pm_accel REAL")
@@ -199,9 +201,10 @@ async def upsert_scores_batch(pool: asyncpg.Pool, scores: list[dict]) -> None:
             await conn.executemany("""
                 INSERT INTO mom_scores
                     (symbol, as_of, score, rank_pct, res14_z, raw14_z, raw7_z,
-                     cvd_pct, ls_ext_short, pre_mom_score, pre_mom_rank_pct,
+                     cvd_pct, ls_ext_short, cvd_tsz_high, cvd_flip,
+                     pre_mom_score, pre_mom_rank_pct,
                      pm_rel7, pm_cvd7, pm_accel, pm_fund, pm_oi)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
                 ON CONFLICT (symbol) DO UPDATE SET
                     as_of             = EXCLUDED.as_of,
                     score             = EXCLUDED.score,
@@ -211,6 +214,8 @@ async def upsert_scores_batch(pool: asyncpg.Pool, scores: list[dict]) -> None:
                     raw7_z            = EXCLUDED.raw7_z,
                     cvd_pct           = EXCLUDED.cvd_pct,
                     ls_ext_short      = EXCLUDED.ls_ext_short,
+                    cvd_tsz_high      = EXCLUDED.cvd_tsz_high,
+                    cvd_flip          = EXCLUDED.cvd_flip,
                     pre_mom_score     = EXCLUDED.pre_mom_score,
                     pre_mom_rank_pct  = EXCLUDED.pre_mom_rank_pct,
                     pm_rel7           = EXCLUDED.pm_rel7,
@@ -224,6 +229,7 @@ async def upsert_scores_batch(pool: asyncpg.Pool, scores: list[dict]) -> None:
                     s.get("score"), s.get("rank_pct"),
                     s.get("res14_z"), s.get("raw14_z"), s.get("raw7_z"),
                     s.get("cvd_pct"), s.get("ls_ext_short"),
+                    s.get("cvd_tsz_high"), s.get("cvd_flip"),
                     s.get("pre_mom_score"), s.get("pre_mom_rank_pct"),
                     s.get("pm_rel7"), s.get("pm_cvd7"), s.get("pm_accel"),
                     s.get("pm_fund"), s.get("pm_oi"),
@@ -237,7 +243,8 @@ async def get_all_scores(pool: asyncpg.Pool) -> tuple[list[dict], dict]:
     async with pool.acquire() as conn:
         score_rows = await conn.fetch("""
             SELECT symbol, as_of, score, rank_pct, res14_z, raw14_z, raw7_z,
-                   cvd_pct, ls_ext_short, pre_mom_score, pre_mom_rank_pct,
+                   cvd_pct, ls_ext_short, cvd_tsz_high, cvd_flip,
+                   pre_mom_score, pre_mom_rank_pct,
                    pm_rel7, pm_cvd7, pm_accel, pm_fund, pm_oi
             FROM mom_scores
             ORDER BY rank_pct DESC NULLS LAST

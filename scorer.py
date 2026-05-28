@@ -116,6 +116,23 @@ def compute_scores(
     z_r7_latest   = z_r7.loc[latest_date]
     p_cvd_latest  = p_cvd.loc[latest_date]
 
+    # FLOW+ flag: CVD ts-z vs 60d history > 2.0
+    # Unusually elevated buying pressure relative to own history on a Q5 name.
+    # Continuation signal — tested: fires on ~15% of Q5 positions, fwd21 +12.35% vs +1.87% baseline.
+    cvd_mean60_ts = cvd_14d_sum.rolling(60, min_periods=30).mean()
+    cvd_std60_ts  = cvd_14d_sum.rolling(60, min_periods=30).std().replace(0, np.nan)
+    cvd_tsz_panel = (cvd_14d_sum - cvd_mean60_ts) / cvd_std60_ts
+    cvd_tsz_latest = cvd_tsz_panel.loc[latest_date] if latest_date in cvd_tsz_panel.index else pd.Series(dtype=float)
+
+    # FLIP flag: CVD 7d sum was negative 7 days ago, now positive (net selling → net buying transition)
+    # Pre-accumulation signal for early warning tab. Fires on ~3% of observations.
+    cvd_7d_sum = (buy_c - sell_c).shift(skip).rolling(7, min_periods=4).sum()
+    cvd_7d_prev = cvd_7d_sum.shift(7)
+    cvd_flip_panel = (cvd_7d_sum > 0) & (cvd_7d_prev < 0)
+    cvd_flip_latest = cvd_flip_panel.loc[latest_date].where(
+        cvd_7d_sum.loc[latest_date].notna() & cvd_7d_prev.loc[latest_date].notna()
+    ) if latest_date in cvd_flip_panel.index else pd.Series(dtype=float)
+
     # L/S extreme short flag: ts-z of ls_global ratio vs 60d history < -1.0
     # Crowded shorts within a high-momentum name = potential squeeze amplifier.
     # Low-confidence screener annotation only — do not use as a composite input.
@@ -203,6 +220,12 @@ def compute_scores(
             "pre_mom_score":    round(float(pre_score[sym]), 4)    if sym in pre_score.index and pd.notna(pre_score.get(sym)) else None,
             "pre_mom_rank_pct": round(float(pre_rank[sym]),  4)    if sym in pre_rank.index  and pd.notna(pre_rank.get(sym))  else None,
             # Individual pre-momentum signal components (for Pre Momentum screener table)
+            "cvd_tsz_high": bool(cvd_tsz_latest[sym] > 2.0)
+                            if sym in cvd_tsz_latest.index and pd.notna(cvd_tsz_latest.get(sym))
+                            else None,
+            "cvd_flip":     bool(cvd_flip_latest[sym])
+                            if sym in cvd_flip_latest.index and pd.notna(cvd_flip_latest.get(sym))
+                            else None,
             "pm_rel7":  round(float(rel_7d_xs[sym]),     3) if sym in rel_7d_xs.index     and pd.notna(rel_7d_xs.get(sym))     else None,
             "pm_cvd7":  round(float(cvd_7d_pct_s[sym]),  3) if sym in cvd_7d_pct_s.index  and pd.notna(cvd_7d_pct_s.get(sym))  else None,
             "pm_accel": round(float(comp_accel_xs[sym]),  3) if sym in comp_accel_xs.index and pd.notna(comp_accel_xs.get(sym)) else None,
@@ -398,6 +421,8 @@ async def write_scores_to_db(pool, scores_dict: dict) -> None:
             "raw7_z":       s.get("raw7_z"),
             "cvd_pct":          s.get("cvd_pct"),
             "ls_ext_short":     s.get("ls_ext_short"),
+            "cvd_tsz_high":     s.get("cvd_tsz_high"),
+            "cvd_flip":         s.get("cvd_flip"),
             "pre_mom_score":    s.get("pre_mom_score"),
             "pre_mom_rank_pct": s.get("pre_mom_rank_pct"),
             "pm_rel7":  s.get("pm_rel7"),
