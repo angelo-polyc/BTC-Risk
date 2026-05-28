@@ -40,27 +40,37 @@ def project_dir() -> Path:
 # Connection pool (lazy init, thread-safe)
 # ---------------------------------------------------------------------------
 
+import threading as _threading
 _pool: psycopg2.pool.ThreadedConnectionPool | None = None
+_pool_lock = _threading.Lock()
 
 
 def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
     global _pool
     if _pool is None:
-        if not DATABASE_URL:
-            raise RuntimeError("DATABASE_URL not set")
-        _pool = psycopg2.pool.ThreadedConnectionPool(1, 10, DATABASE_URL)
+        with _pool_lock:
+            if _pool is None:
+                if not DATABASE_URL:
+                    raise RuntimeError("DATABASE_URL not set")
+                _pool = psycopg2.pool.ThreadedConnectionPool(2, 20, DATABASE_URL)
     return _pool
 
 
 def _query(sql: str, params=None) -> list[dict]:
     pool = _get_pool()
-    conn = pool.getconn()
-    try:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(sql, params)
-            return [dict(r) for r in cur.fetchall()]
-    finally:
-        pool.putconn(conn)
+    for attempt in range(2):
+        conn = pool.getconn()
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql, params)
+                result = [dict(r) for r in cur.fetchall()]
+            pool.putconn(conn)
+            return result
+        except psycopg2.OperationalError:
+            pool.putconn(conn, close=True)
+            if attempt == 1:
+                raise
+    raise RuntimeError("unreachable")
 
 
 # ---------------------------------------------------------------------------
