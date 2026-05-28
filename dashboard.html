@@ -808,6 +808,28 @@
   }
 
   /* Flag pills */
+  .mom-method {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 0 12px;
+    border-bottom: 1px solid var(--rule-hair);
+    margin-bottom: 12px;
+  }
+  .mom-method span {
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    line-height: 1.5;
+    padding-left: 12px;
+    position: relative;
+  }
+  .mom-method span::before {
+    content: "·";
+    position: absolute;
+    left: 2px;
+    color: var(--ink-softer);
+  }
+
   .mom-flag {
     display: inline-flex;
     align-items: center;
@@ -942,8 +964,8 @@
 <!-- ═══ TAB NAV ═══ -->
 <div class="tab-nav">
   <button id="tab-btn-model" class="active" type="button">Risk Model</button>
-  <button id="tab-btn-divergence" type="button">Divergence Scanner</button>
   <button id="tab-btn-momentum" type="button">Momentum Screener</button>
+  <button id="tab-btn-divergence" type="button">Divergence Scanner</button>
 </div>
 
 <div id="content-model">
@@ -1160,6 +1182,28 @@
       </div>
     </div>
   </div>
+  <!-- Methodology panels — one per view, shown/hidden with view toggle -->
+  <div id="mom-method-screener" class="mom-method">
+    <span>Cross-sectional composite: equal-weight of beta-adjusted 14d return, raw 14d &amp; 7d return, and CVD taker buy flow percentile rank — scores each token relative to the 233-token universe daily.</span>
+    <span>Q5 = top 20% by rank_pct (≥ 0.80) — confirmed momentum names with IC IR of 2.27 on TEST and 61% Q5 hit rate at 21-day horizon.</span>
+    <span>Rebalance every 7 days, 30-day forced exit. In bear regime (gate off), RAW↓ flags names whose absolute 14d return is below the universe average — lower conviction.</span>
+  </div>
+  <div id="mom-method-preq5" class="mom-method" style="display:none">
+    <span>5-signal forward-looking composite: BTC-relative 7d return, CVD buy pressure, composite score acceleration vs 7 days ago, extreme short positioning (funding ts-z &lt; −1.5), and OI 14d growth.</span>
+    <span>Top quintile flags ~28 non-Q5 tokens per day that enter Q5 within 14 days at ~59% — a +16pp lift over the 43% base rate, validated out-of-sample across 2024–2026.</span>
+    <span>Pre-entry signal, not a position recommendation. Expected fwd21 return +0.8% vs confirmed Q5 +1.4% — you are buying the setup before momentum is confirmed.</span>
+  </div>
+  <div id="mom-method-heatmap" class="mom-method" style="display:none">
+    <span>7-day moving average of each token's daily momentum rank_pct, rendered as a time × token grid sorted by current rank (leaders at top).</span>
+    <span>Green = Q5 territory (rank_pct ≥ 0.80), red = low momentum, white = median. Color intensity reflects rank strength, not absolute price change.</span>
+    <span>Use to identify persistent leaders vs recent entrants vs fading names — and to spot regime-wide momentum expansions or contractions across the universe.</span>
+  </div>
+  <div id="mom-method-chart" class="mom-method" style="display:none">
+    <span>Top panel: cumulative % return from series start — all tokens normalized to a 0% baseline so relative performance is directly comparable regardless of price level.</span>
+    <span>Bottom panel: 7-day MA of daily momentum rank_pct with a dotted 80% Q5 threshold line — shows when each token has or had confirmed momentum status.</span>
+    <span>BTC shown by default as benchmark. Add tokens via dropdown; each gets a distinct color. Use 1Y/6M/3M toggle to zoom the time window.</span>
+  </div>
+
   <div id="mom-screener-wrap">
     <div class="placeholder tall">screener · awaiting load</div>
   </div>
@@ -3930,6 +3974,12 @@ function setupMomentumToggles() {
   const chartWrap    = document.getElementById("mom-chart-wrap");
   const tokenSelWrap = document.getElementById("mom-token-select-wrap");
   const timeToggle   = document.getElementById("mom-time-toggle");
+  const methodPanels = {
+    screener: document.getElementById("mom-method-screener"),
+    preq5:    document.getElementById("mom-method-preq5"),
+    heatmap:  document.getElementById("mom-method-heatmap"),
+    chart:    document.getElementById("mom-method-chart"),
+  };
 
   viewToggle.querySelectorAll("button").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -3942,6 +3992,7 @@ function setupMomentumToggles() {
       chartWrap.style.display    = _momViewMode === "chart"    ? "block" : "none";
       tokenSelWrap.style.display = _momViewMode === "chart"    ? "" : "none";
       timeToggle.style.display   = _momViewMode === "chart"    ? "" : "none";
+      Object.entries(methodPanels).forEach(([k, el]) => { if (el) el.style.display = k === _momViewMode ? "" : "none"; });
 
       if (_momViewMode === "preq5")    renderMomentumPreQ5();
       if (_momViewMode === "heatmap")  loadMomentumHistory();
