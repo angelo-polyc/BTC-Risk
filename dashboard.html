@@ -816,6 +816,14 @@
     border-bottom: 1px solid var(--rule-hair);
     margin-bottom: 12px;
   }
+  .mom-method-title {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-softer);
+    margin-bottom: 4px;
+  }
   .mom-method span {
     font-size: 11.5px;
     color: var(--ink-soft);
@@ -1184,21 +1192,23 @@
   </div>
   <!-- Methodology panels — one per view, shown/hidden with view toggle -->
   <div id="mom-method-screener" class="mom-method">
+    <div class="mom-method-title">Methodology</div>
     <span>Cross-sectional composite: equal-weight of beta-adjusted 14d return, raw 14d &amp; 7d return, and CVD taker buy flow percentile rank — scores each token relative to the 233-token universe daily.</span>
-    <span>Q5 = top 20% by rank_pct (≥ 0.80) — confirmed momentum names with IC IR of 2.27 on TEST and 61% Q5 hit rate at 21-day horizon.</span>
-    <span>Rebalance every 7 days, 30-day forced exit. In bear regime (gate off), RAW↓ flags names whose absolute 14d return is below the universe average — lower conviction.</span>
+    <span>Statistically robust alpha — Q5 names show statistically robust alpha, with an IC IR of 2.27 (OOS) and 61% Q5 hit rate at the 21-day horizon.</span>
   </div>
   <div id="mom-method-preq5" class="mom-method" style="display:none">
-    <span>5-signal forward-looking composite: BTC-relative 7d return, CVD buy pressure, composite score acceleration vs 7 days ago, extreme short positioning (funding ts-z &lt; −1.5), and OI 14d growth.</span>
-    <span>Top quintile flags ~28 non-Q5 tokens per day that enter Q5 within 14 days at ~59% — a +16pp lift over the 43% base rate, validated out-of-sample across 2024–2026.</span>
-    <span>Pre-entry signal, not a position recommendation. Expected fwd21 return +0.8% vs confirmed Q5 +1.4% — you are buying the setup before momentum is confirmed.</span>
+    <div class="mom-method-title">Methodology</div>
+    <span>5-signal composite scored daily across non-Q5 tokens: each signal is cross-sectionally z-scored then equal-weighted. Signals: (1) BTC-relative 7d return — token outperformance vs BTC; (2) CVD 7d taker buy percentile — net USD buy pressure rank; (3) composite score Δ vs 7 days ago — momentum building; (4) extreme short funding flag (funding ts-z &lt; −1.5) — squeeze setup; (5) OI 14d growth z-score — accumulation signal.</span>
+    <span>Statistically robust alpha — top-quintile flags ~28 non-Q5 names per day with a 59% Q5 entry rate within 14 days, a +16pp lift over the 43% base rate, validated OOS across 2024–2026.</span>
   </div>
   <div id="mom-method-heatmap" class="mom-method" style="display:none">
+    <div class="mom-method-title">Methodology</div>
     <span>7-day moving average of each token's daily momentum rank_pct, rendered as a time × token grid sorted by current rank (leaders at top).</span>
     <span>Green = Q5 territory (rank_pct ≥ 0.80), red = low momentum, white = median. Color intensity reflects rank strength, not absolute price change.</span>
     <span>Use to identify persistent leaders vs recent entrants vs fading names — and to spot regime-wide momentum expansions or contractions across the universe.</span>
   </div>
   <div id="mom-method-chart" class="mom-method" style="display:none">
+    <div class="mom-method-title">Methodology</div>
     <span>Top panel: cumulative % return from series start — all tokens normalized to a 0% baseline so relative performance is directly comparable regardless of price level.</span>
     <span>Bottom panel: 7-day MA of daily momentum rank_pct with a dotted 80% Q5 threshold line — shows when each token has or had confirmed momentum status.</span>
     <span>BTC shown by default as benchmark. Add tokens via dropdown; each gets a distinct color. Use 1Y/6M/3M toggle to zoom the time window.</span>
@@ -3219,14 +3229,16 @@ function momRankColor(val) {
   const green = [46, 106, 59];
   const white = [250, 248, 243];
   const red   = [181, 56, 31];
+  // Gamma = 1.5 compresses the extremes so transitions are visible across the
+  // full 0.4–0.9 range, not just near the midpoint.
+  const dist  = Math.abs(val - 0.5) / 0.5;          // 0 at midpoint, 1 at extreme
+  const t     = Math.pow(dist, 1.5);                 // slower ramp toward full color
   let r, g, b;
   if (val <= 0.5) {
-    const t = val / 0.5;
-    r = Math.round(red[0] + (white[0] - red[0]) * t);
-    g = Math.round(red[1] + (white[1] - red[1]) * t);
-    b = Math.round(red[2] + (white[2] - red[2]) * t);
+    r = Math.round(white[0] + (red[0]   - white[0]) * t);
+    g = Math.round(white[1] + (red[1]   - white[1]) * t);
+    b = Math.round(white[2] + (red[2]   - white[2]) * t);
   } else {
-    const t = (val - 0.5) / 0.5;
     r = Math.round(white[0] + (green[0] - white[0]) * t);
     g = Math.round(white[1] + (green[1] - white[1]) * t);
     b = Math.round(white[2] + (green[2] - white[2]) * t);
