@@ -1,9 +1,12 @@
-"""Composite scoring — production implementation of the v2 momentum composite.
+"""Composite scoring — production implementation of the G+ momentum composite.
 
-score = (1/4) * [z(residual_14d) + z(raw_14d) + z(raw_7d) + pct_rank(cvd_14d_sum)]
+score = z(residual_14d)×1 + z(raw_14d)×1 + z(raw_7d)×1
+      + z(within_bucket_cvd_14d)×2 + z(funding_xs)×0.5   (total weight 5.5)
 
 All z-scores are cross-sectional (per date, across tokens).
-BTC 200d MA regime gate determines gate_on status.
+Within-bucket CVD ranks within large/mid/small thirds of the universe by market cap,
+then z-scores the pct_ranks across the full cross-section.
+BTC 200d MA regime gate is recorded as gate_on but does NOT gate position sizing.
 """
 from __future__ import annotations
 
@@ -13,6 +16,16 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+# ---------------------------------------------------------------------------
+# Universe size-bucket metadata — loaded once at module level
+# ---------------------------------------------------------------------------
+_HERE = Path(__file__).parent
+_SYMS: list[str] = json.loads((_HERE / "symbols.json").read_text())
+_n = len(_SYMS)
+_LARGE_SYMS: frozenset[str] = frozenset(_SYMS[:_n // 3])
+_MID_SYMS:   frozenset[str] = frozenset(_SYMS[_n // 3: 2 * _n // 3])
+_SMALL_SYMS: frozenset[str] = frozenset(_SYMS[2 * _n // 3:])
 
 
 # --------------------------------------------------------------------------- #
@@ -90,19 +103,37 @@ def compute_scores(
     z_res  = _xs_zscore(residual_14d)
     z_r14  = _xs_zscore(raw_14d)
     z_r7   = _xs_zscore(raw_7d)
-    p_cvd  = _xs_pct_rank(cvd_14d_sum)
 
-    # ---- composite (NaN-tolerant mean, require at least 3 of 4 components) ----
-    # Tokens without CVD score on 3 price components; tokens with CVD score on 4.
-    n_valid = (z_res.notna().astype(int) + z_r14.notna().astype(int) +
-               z_r7.notna().astype(int)  + p_cvd.notna().astype(int))
-    total   = z_res.fillna(0) + z_r14.fillna(0) + z_r7.fillna(0) + p_cvd.fillna(0)
-    composite = (total / n_valid).where(n_valid >= 3)
+    # Within-bucket CVD: rank within large/mid/small thirds, then z-score across full universe
+    cvd_bucket_pct = pd.DataFrame(np.nan, index=prices_c.index, columns=prices_c.columns)
+    for bucket in [_LARGE_SYMS, _MID_SYMS, _SMALL_SYMS]:
+        cols = [c for c in prices_c.columns if c in bucket]
+        if cols:
+            cvd_bucket_pct[cols] = cvd_14d_sum[cols].rank(axis=1, pct=True, na_option='keep')
+    z_buck = _xs_zscore(cvd_bucket_pct)
+
+    # Funding xs-z: cross-sectional z-score of shifted funding panel
+    if funding is not None and not funding.empty:
+        fund_r    = funding.reindex(index=prices_c.index, columns=prices_c.columns)
+        z_fund_xs = _xs_zscore(fund_r.shift(skip))
+    else:
+        z_fund_xs = pd.DataFrame(np.nan, index=prices_c.index, columns=prices_c.columns)
+
+    # ---- G+ composite (NaN-tolerant weighted, require ≥ 50% weight coverage) ----
+    # Weights: res14=1, raw14=1, raw7=1, buck_cvd=2, funding=0.5  → total_w = 5.5
+    _comps_w = [(z_res, 1.0), (z_r14, 1.0), (z_r7, 1.0), (z_buck, 2.0), (z_fund_xs, 0.5)]
+    _total_w = 5.5
+    n_valid_w = sum(c.notna().astype(float) * w for c, w in _comps_w)
+    total     = sum(c.fillna(0) * w           for c, w in _comps_w)
+    composite = (total / n_valid_w).where(n_valid_w >= _total_w * 0.5)
 
     # ---- latest scores ----
-    latest_date  = composite.dropna(how="all").index[-1]
+    latest_date   = composite.dropna(how="all").index[-1]
     latest_scores = composite.loc[latest_date].dropna().sort_values(ascending=False)
     latest_ranks  = latest_scores.rank(pct=True, ascending=True)
+
+    # funding_z at latest date (for per-token component bar in dashboard)
+    z_fund_xs_latest = z_fund_xs.loc[latest_date] if latest_date in z_fund_xs.index else pd.Series(dtype=float)
 
     # ---- regime gate ----
     btc_series = prices["BTC"] if "BTC" in prices.columns else prices.iloc[:, 0]
@@ -114,7 +145,7 @@ def compute_scores(
     z_res_latest  = z_res.loc[latest_date]
     z_r14_latest  = z_r14.loc[latest_date]
     z_r7_latest   = z_r7.loc[latest_date]
-    p_cvd_latest  = p_cvd.loc[latest_date]
+    z_buck_latest = z_buck.loc[latest_date]
 
     # FLOW+ flag: CVD ts-z vs 60d history > 2.0
     # Unusually elevated buying pressure relative to own history on a Q5 name.
@@ -172,37 +203,28 @@ def compute_scores(
     else:
         comp_accel_xs = pd.Series(dtype=float)
 
-    # Signal 4: Extreme short funding flag (ts-z < -1.5)
-    if funding is not None and not funding.empty:
-        fund_r     = funding.reindex(index=prices_c.index, columns=prices_c.columns)
-        fund_mean  = fund_r.rolling(60, min_periods=30).mean()
-        fund_std   = fund_r.rolling(60, min_periods=30).std().replace(0, np.nan)
-        fund_tsz_l = ((fund_r - fund_mean) / fund_std).loc[latest_date] if latest_date in fund_r.index else pd.Series(dtype=float)
-        ext_short  = (fund_tsz_l < -1.5).astype(float).where(fund_tsz_l.notna()).fillna(0)
-        ext_short_xs = _xs_z(ext_short)
-    else:
-        ext_short_xs = pd.Series(dtype=float)
-
-    # Signal 5: OI growth 14d, cross-sectional z-score
+    # Signal 4: OI growth 14d, cross-sectional z-score
     if oi is not None and not oi.empty:
-        oi_r       = oi.reindex(index=prices_c.index, columns=prices_c.columns)
-        oi_growth  = oi_r.shift(skip) / oi_r.shift(skip + 14) - 1
+        oi_r        = oi.reindex(index=prices_c.index, columns=prices_c.columns)
+        oi_growth   = oi_r.shift(skip) / oi_r.shift(skip + 14) - 1
         oi_growth_l = oi_growth.loc[latest_date] if latest_date in oi_growth.index else pd.Series(dtype=float)
-        oi_xs      = _xs_z(oi_growth_l.dropna())
+        oi_xs       = _xs_z(oi_growth_l.dropna())
     else:
         oi_xs = pd.Series(dtype=float)
 
-    # Combine — equal-weight, NaN-tolerant (require ≥ 2 of 5)
-    pre_components = [rel_7d_xs, cvd_7d_xs, comp_accel_xs, ext_short_xs, oi_xs]
-    all_syms = prices_c.columns
-    pre_total  = pd.Series(0.0, index=all_syms)
-    pre_nvalid = pd.Series(0,   index=all_syms)
-    for comp in pre_components:
+    # Combine — Variant E: 4 signals, CVD at 1.5×, ext_short dropped (consistently negative)
+    # Weights: rel_7d=1, cvd_7d=1.5, comp_accel=1, oi=1  → total_w_pm = 4.5
+    pre_components_weighted = [(rel_7d_xs, 1.0), (cvd_7d_xs, 1.5), (comp_accel_xs, 1.0), (oi_xs, 1.0)]
+    total_w_pm   = sum(w for _, w in pre_components_weighted)
+    all_syms     = prices_c.columns
+    pre_total    = pd.Series(0.0, index=all_syms)
+    pre_nvalid_w = pd.Series(0.0, index=all_syms)
+    for comp, w in pre_components_weighted:
         comp_r = comp.reindex(all_syms)
         valid  = comp_r.notna()
-        pre_total  += comp_r.fillna(0)
-        pre_nvalid += valid.astype(int)
-    pre_score = (pre_total / pre_nvalid).where(pre_nvalid >= 2)
+        pre_total    += comp_r.fillna(0) * w
+        pre_nvalid_w += valid.astype(float) * w
+    pre_score = (pre_total / pre_nvalid_w).where(pre_nvalid_w >= total_w_pm * 0.4)
     pre_rank  = pre_score.rank(pct=True, ascending=True, na_option='keep')
 
     scores_list = [
@@ -210,10 +232,11 @@ def compute_scores(
             "symbol":           sym,
             "score":            round(float(latest_scores[sym]), 4),
             "rank_pct":         round(float(latest_ranks[sym]),  4),
-            "res14_z":          round(float(z_res_latest[sym]),  3) if pd.notna(z_res_latest.get(sym)) else None,
-            "raw14_z":          round(float(z_r14_latest[sym]),  3) if pd.notna(z_r14_latest.get(sym)) else None,
-            "raw7_z":           round(float(z_r7_latest[sym]),   3) if pd.notna(z_r7_latest.get(sym))  else None,
-            "cvd_pct":          round(float(p_cvd_latest[sym]),  3) if pd.notna(p_cvd_latest.get(sym)) else None,
+            "res14_z":          round(float(z_res_latest[sym]),  3)  if pd.notna(z_res_latest.get(sym))  else None,
+            "raw14_z":          round(float(z_r14_latest[sym]),  3)  if pd.notna(z_r14_latest.get(sym))  else None,
+            "raw7_z":           round(float(z_r7_latest[sym]),   3)  if pd.notna(z_r7_latest.get(sym))   else None,
+            "cvd_pct":          round(float(z_buck_latest[sym]), 3)  if pd.notna(z_buck_latest.get(sym)) else None,
+            "funding_z":        round(float(z_fund_xs_latest[sym]), 3) if sym in z_fund_xs_latest.index and pd.notna(z_fund_xs_latest.get(sym)) else None,
             "ls_ext_short":     bool(ls_ext_short_latest[sym] < -1.0)
                                 if sym in ls_ext_short_latest.index and pd.notna(ls_ext_short_latest[sym])
                                 else None,
@@ -229,7 +252,7 @@ def compute_scores(
             "pm_rel7":  round(float(rel_7d_xs[sym]),     3) if sym in rel_7d_xs.index     and pd.notna(rel_7d_xs.get(sym))     else None,
             "pm_cvd7":  round(float(cvd_7d_pct_s[sym]),  3) if sym in cvd_7d_pct_s.index  and pd.notna(cvd_7d_pct_s.get(sym))  else None,
             "pm_accel": round(float(comp_accel_xs[sym]),  3) if sym in comp_accel_xs.index and pd.notna(comp_accel_xs.get(sym)) else None,
-            "pm_fund":  round(-float(fund_tsz_l[sym]),   3) if funding is not None and not funding.empty and sym in fund_tsz_l.index and pd.notna(fund_tsz_l.get(sym)) else None,
+            "pm_fund":  None,  # ext_short dropped in Variant E — consistently negative signal
             "pm_oi":    round(float(oi_xs[sym]),          3) if sym in oi_xs.index          and pd.notna(oi_xs.get(sym))          else None,
         }
         for sym in latest_scores.index
@@ -420,6 +443,7 @@ async def write_scores_to_db(pool, scores_dict: dict) -> None:
             "raw14_z":      s.get("raw14_z"),
             "raw7_z":       s.get("raw7_z"),
             "cvd_pct":          s.get("cvd_pct"),
+            "funding_z":        s.get("funding_z"),
             "ls_ext_short":     s.get("ls_ext_short"),
             "cvd_tsz_high":     s.get("cvd_tsz_high"),
             "cvd_flip":         s.get("cvd_flip"),
