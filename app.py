@@ -209,6 +209,7 @@ async def signal_history(symbol: str, days: int = 90, x_api_key: str | None = No
     buy   = await panel("taker_buy")
     sell  = await panel("taker_sell")
     fund  = await panel("funding")
+    oi    = await panel("oi")
 
     cutoff = pd.Timestamp.now().normalize() - pd.Timedelta(days=days - 1)
 
@@ -237,8 +238,34 @@ async def signal_history(symbol: str, days: int = 90, x_api_key: str | None = No
     if not price.empty:
         raw14 = price / price.shift(14) - 1
 
+    # Raw 7d return
+    raw7 = pd.Series(dtype=float)
+    if not price.empty:
+        raw7 = price / price.shift(7) - 1
+
+    # OI 14d growth
+    oi_growth = pd.Series(dtype=float)
+    if not oi.empty:
+        oi_growth = (oi - oi.shift(14)) / oi.shift(14)
+
+    # rank_pct history from mom_scores_history
+    cutoff_str = cutoff.date().isoformat()
+    async with _pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT date, rank_pct FROM mom_scores_history WHERE symbol=$1 AND date>=$2 ORDER BY date",
+            symbol.upper(), cutoff_str
+        )
+    rank_hist_raw = {r["date"]: r["rank_pct"] for r in rows}
+    # Build as Series with DatetimeIndex
+    if rank_hist_raw:
+        rank_hist = pd.Series(
+            {pd.Timestamp(d): float(v) for d, v in rank_hist_raw.items()}
+        ).sort_index()
+    else:
+        rank_hist = pd.Series(dtype=float)
+
     # Align all to a common date index
-    all_series = [ts(cvd_tsz), ts(cvd_7d), ts(fund_tsz), ts(raw14)]
+    all_series = [ts(cvd_tsz), ts(cvd_7d), ts(fund_tsz), ts(raw14), ts(raw7), ts(oi_growth), rank_hist]
     idx = sorted(set().union(*[set(s.index) for s in all_series if not s.empty]))
     idx = pd.DatetimeIndex(idx)
 
@@ -246,12 +273,15 @@ async def signal_history(symbol: str, days: int = 90, x_api_key: str | None = No
         return fmt(s.reindex(idx)) if not s.empty else [None] * len(idx)
 
     return JSONResponse(content={
-        "symbol":     symbol.upper(),
-        "dates":      [str(d.date()) for d in idx],
-        "cvd_tsz":    aligned(ts(cvd_tsz)),
-        "cvd_7d_sum": aligned(ts(cvd_7d)),
-        "fund_tsz":   aligned(ts(fund_tsz)),
-        "raw_14d":    aligned(ts(raw14)),
+        "symbol":           symbol.upper(),
+        "dates":            [str(d.date()) for d in idx],
+        "cvd_tsz":          aligned(ts(cvd_tsz)),
+        "cvd_7d_sum":       aligned(ts(cvd_7d)),
+        "fund_tsz":         aligned(ts(fund_tsz)),
+        "raw_14d":          aligned(ts(raw14)),
+        "raw_7d":           aligned(ts(raw7)),
+        "oi_growth":        aligned(ts(oi_growth)),
+        "rank_pct_history": aligned(rank_hist),
     })
 
 
