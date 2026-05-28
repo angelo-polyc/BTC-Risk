@@ -807,6 +807,14 @@
     width: 1px;
     background: var(--rule);
   }
+  .mom-comp-na {
+    width: 100%; height: 100%;
+    background: var(--rule-hair);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px; color: var(--ink-softer);
+    letter-spacing: 0.03em;
+  }
   .mom-comp-fill {
     position: absolute;
     top: 1px; bottom: 1px;
@@ -3436,7 +3444,7 @@ function renderMomentumScreener() {
   function compBar(val, isZscore, label, signalKey) {
     const attrs = signalKey ? `data-signal="${signalKey}" style="cursor:pointer"` : '';
     if (val == null) {
-      return `<div class="mom-comp-item" title="${label}" ${attrs}><div class="mom-comp-bar-wrap"><div class="mom-comp-mid"></div></div></div>`;
+      return `<div class="mom-comp-item" title="${label} — no data" ${attrs}><div class="mom-comp-bar-wrap" style="position:relative"><div class="mom-comp-na">n/a</div></div></div>`;
     }
     let frac;
     if (isZscore) {
@@ -3546,7 +3554,7 @@ function renderMomentumPreQ5() {
 
   function compBar(val, isZscore, label, signalKey) {
     const attrs = signalKey ? `data-signal="${signalKey}" style="cursor:pointer"` : '';
-    if (val == null) return `<div class="mom-comp-item" title="${label}" ${attrs}><div class="mom-comp-bar-wrap"></div></div>`;
+    if (val == null) return `<div class="mom-comp-item" title="${label} — no data" ${attrs}><div class="mom-comp-bar-wrap" style="position:relative"><div class="mom-comp-na">n/a</div></div></div>`;
     const CLIP = 2.5;
     let pct, pos;
     if (isZscore) {
