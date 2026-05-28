@@ -3447,7 +3447,7 @@ function renderMomentumScreener() {
       flagsHtml += `<span class="mom-flag cvd-warn" data-tooltip="Net taker sell pressure over the past 7 days. This name sits below the Q5 median CVD — distribution risk. Informed sellers may be using momentum to exit. Consider reduced sizing.">CVD↓</span>`;
     }
     if (r.ls_ext_short === true) {
-      flagsHtml += `<span class="mom-flag ls-ext" data-tooltip="Crowded short positioning relative to own 60-day history. When shorts are extreme in a high-momentum name, a squeeze can amplify the move. Low-confidence annotation — use as context, not a signal.">⚡</span>`;
+      flagsHtml += `<span class="mom-flag ls-ext" data-tooltip="Crowded short positioning relative to own 60-day history. When shorts are extreme in a high-momentum name, a squeeze can amplify the move. Low-confidence annotation — use as context, not a signal.">SHORTS↑</span>`;
     }
     if (r.cvd_tsz_high === true) {
       flagsHtml += `<span class="mom-flag flow-plus" data-tooltip="Buying pressure is unusually elevated relative to this token's own 60-day history (CVD ts-z > 2.0). Continuation signal — tested: Q5 names with this flag return +12% fwd21 vs +2% baseline. Hold, do not exit.">FLOW+</span>`;
@@ -3556,7 +3556,7 @@ function renderMomentumPreQ5() {
 
     let flagsHtml = "";
     if (r.ls_ext_short === true)
-      flagsHtml += `<span class="mom-flag ls-ext" data-tooltip="Crowded short positioning relative to 60-day history. Potential short squeeze amplifier.">⚡</span>`;
+      flagsHtml += `<span class="mom-flag ls-ext" data-tooltip="Crowded short positioning relative to 60-day history. Potential short squeeze amplifier.">SHORTS↑</span>`;
     if (r.cvd_flip === true)
       flagsHtml += `<span class="mom-flag cvd-flip" data-tooltip="Net taker flow flipped from negative to positive in the last 7 days — selling pressure has turned to buying. Pre-accumulation transition signal. Fires on ~3% of observations.">FLIP</span>`;
     if (rawDown)
