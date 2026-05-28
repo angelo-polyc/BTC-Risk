@@ -210,6 +210,7 @@ async def signal_history(symbol: str, days: int = 90, x_api_key: str | None = No
     sell  = await panel("taker_sell")
     fund  = await panel("funding")
     oi    = await panel("oi")
+    ls    = await panel("ls_global")
 
     cutoff = pd.Timestamp.now().normalize() - pd.Timedelta(days=days - 1)
 
@@ -248,6 +249,11 @@ async def signal_history(symbol: str, days: int = 90, x_api_key: str | None = No
     if not oi.empty:
         oi_growth = (oi - oi.shift(14)) / oi.shift(14)
 
+    # L/S global ratio ts-z (what actually drives the SHORTS↑ flag)
+    ls_tsz = pd.Series(dtype=float)
+    if not ls.empty:
+        ls_tsz = (ls - ls.rolling(60, min_periods=30).mean()) / ls.rolling(60, min_periods=30).std().replace(0, np.nan)
+
     # rank_pct history from mom_scores_history
     cutoff_str = cutoff.date().isoformat()
     async with _pool.acquire() as conn:
@@ -265,7 +271,7 @@ async def signal_history(symbol: str, days: int = 90, x_api_key: str | None = No
         rank_hist = pd.Series(dtype=float)
 
     # Align all to a common date index
-    all_series = [ts(cvd_tsz), ts(cvd_7d), ts(fund_tsz), ts(raw14), ts(raw7), ts(oi_growth), rank_hist]
+    all_series = [ts(cvd_tsz), ts(cvd_7d), ts(fund_tsz), ts(raw14), ts(raw7), ts(oi_growth), ts(ls_tsz), rank_hist]
     idx = sorted(set().union(*[set(s.index) for s in all_series if not s.empty]))
     idx = pd.DatetimeIndex(idx)
 
@@ -281,6 +287,7 @@ async def signal_history(symbol: str, days: int = 90, x_api_key: str | None = No
         "raw_14d":          aligned(ts(raw14)),
         "raw_7d":           aligned(ts(raw7)),
         "oi_growth":        aligned(ts(oi_growth)),
+        "ls_global_tsz":    aligned(ts(ls_tsz)),
         "rank_pct_history": aligned(rank_hist),
     })
 
