@@ -854,6 +854,8 @@
   .mom-flag.cvd-warn  { border-color: var(--bear); color: var(--bear); }
   .mom-flag.ls-ext    { border-color: var(--bear); color: var(--bear); background: rgba(181,56,31,0.06); }
   .mom-flag.raw-down  { border-color: var(--ink-softer); color: var(--ink-softer); }
+  .mom-flag.flow-plus { border-color: var(--bull); color: var(--bull); background: rgba(46,106,59,0.06); }
+  .mom-flag.cvd-flip  { border-color: #3498db; color: #3498db; }
   .mom-flag[data-tooltip] { cursor: default; }
 
   /* Flag tooltip */
@@ -3446,6 +3448,9 @@ function renderMomentumScreener() {
     if (r.ls_ext_short === true) {
       flagsHtml += `<span class="mom-flag ls-ext" data-tooltip="Crowded short positioning relative to own 60-day history. When shorts are extreme in a high-momentum name, a squeeze can amplify the move. Low-confidence annotation — use as context, not a signal.">⚡</span>`;
     }
+    if (r.cvd_tsz_high === true) {
+      flagsHtml += `<span class="mom-flag flow-plus" data-tooltip="Buying pressure is unusually elevated relative to this token's own 60-day history (CVD ts-z > 2.0). Continuation signal — tested: Q5 names with this flag return +12% fwd21 vs +2% baseline. Hold, do not exit.">FLOW+</span>`;
+    }
     if (rawDown) {
       flagsHtml += `<span class="mom-flag raw-down" data-tooltip="Raw 14-day return is below the universe average in a bear regime. This name's composite score reflects relative resilience, not absolute strength — it may still be declining in USD terms. Lower conviction in bear.">RAW↓</span>`;
     }
@@ -3551,6 +3556,8 @@ function renderMomentumPreQ5() {
     let flagsHtml = "";
     if (r.ls_ext_short === true)
       flagsHtml += `<span class="mom-flag ls-ext" data-tooltip="Crowded short positioning relative to 60-day history. Potential short squeeze amplifier.">⚡</span>`;
+    if (r.cvd_flip === true)
+      flagsHtml += `<span class="mom-flag cvd-flip" data-tooltip="Net taker flow flipped from negative to positive in the last 7 days — selling pressure has turned to buying. Pre-accumulation transition signal. Fires on ~3% of observations.">FLIP</span>`;
     if (rawDown)
       flagsHtml += `<span class="mom-flag raw-down" data-tooltip="Raw 14-day return below universe average in bear regime. Lower conviction.">RAW↓</span>`;
 
