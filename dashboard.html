@@ -740,6 +740,11 @@
   table.mom-table tr:last-child td { border-bottom: 1px solid var(--ink); }
   /* bear-filtered rows no longer greyed — signal shown via RAW↓ flag instead */
 
+  table.mom-table tr.q5-row td:first-child {
+    border-left: 3px solid var(--bull);
+    padding-left: 5px;
+  }
+
   /* Rank bar */
   .mom-rank-bar {
     display: flex;
@@ -1190,11 +1195,7 @@
     <h2>Universe — Momentum Scores</h2>
     <div class="section-head-right">
       <div class="meta" id="mom-section-meta" style="margin-right:12px">—</div>
-      <div class="toggle" id="mom-q5-toggle">
-        <button data-q5="true" class="active">Q5</button>
-        <button data-q5="false">All</button>
-      </div>
-      <div class="toggle" id="mom-view-toggle" style="margin-left:8px">
+      <div class="toggle" id="mom-view-toggle">
         <button data-view="screener" class="active">Screener</button>
         <button data-view="preq5">Early Warning</button>
         <button data-view="heatmap">Heatmap</button>
@@ -3239,7 +3240,6 @@ let _momScores      = null;
 let _momHistory     = null;
 let _momPrices      = null;
 let _momViewMode    = "screener";  // "screener" | "heatmap" | "chart"
-let _momQ5Only      = true;
 const MOM_TOKEN_COLORS = [
   "#f7931a",  // BTC — bitcoin orange (index 0, reserved)
   "#3498db",  // blue
@@ -3424,8 +3424,7 @@ function renderMomentumScreener() {
   const { scores, gate_on, regime } = _momScores;
   const bearMode = gate_on === false;  /* bear regime: gate off */
   let rows = [...scores];
-  if (_momQ5Only) rows = rows.filter(r => r.rank_pct >= 0.80);
-  /* Already sorted best-first from API; re-sort All mode defensively */
+  /* Always show all tokens sorted best-first; Q5 membership marked visually */
   rows.sort((a, b) => b.rank_pct - a.rank_pct);
 
   if (!rows.length) {
@@ -3434,9 +3433,10 @@ function renderMomentumScreener() {
   }
 
   /* Component bar HTML — z-scores clip to ±2.5, CVD is 0-1 */
-  function compBar(val, isZscore, label) {
+  function compBar(val, isZscore, label, signalKey) {
+    const attrs = signalKey ? `data-signal="${signalKey}" style="cursor:pointer"` : '';
     if (val == null) {
-      return `<div class="mom-comp-item" title="${label}"><div class="mom-comp-bar-wrap"><div class="mom-comp-mid"></div></div></div>`;
+      return `<div class="mom-comp-item" title="${label}" ${attrs}><div class="mom-comp-bar-wrap"><div class="mom-comp-mid"></div></div></div>`;
     }
     let frac;
     if (isZscore) {
@@ -3449,7 +3449,7 @@ function renderMomentumScreener() {
     const left  = isPos ? "50%" : (50 - absW).toFixed(1) + "%";
     const width = absW.toFixed(1) + "%";
     const color = isPos ? "var(--bull)" : "var(--bear)";
-    return `<div class="mom-comp-item" title="${label}: ${val.toFixed(2)}">
+    return `<div class="mom-comp-item" title="${label}: ${val.toFixed(2)}" ${attrs}>
       <div class="mom-comp-bar-wrap">
         <div class="mom-comp-mid"></div>
         <div class="mom-comp-fill" style="left:${left};width:${width};background:${color};opacity:0.75;"></div>
@@ -3470,11 +3470,11 @@ function renderMomentumScreener() {
     </div>`;
 
     const compHtml = `<div class="mom-comp-bars">
-      ${compBar(r.res14_z,   true,  "res14_z — BTC-beta adjusted 14d return")}
-      ${compBar(r.raw14_z,   true,  "raw14_z — raw 14d return")}
-      ${compBar(r.raw7_z,    true,  "raw7_z — raw 7d return")}
-      ${compBar(r.cvd_pct,   false, "cvd — within-bucket CVD pct rank (z-scored)")}
-      ${compBar(r.funding_z, true,  "funding — cross-sectional funding rate z-score")}
+      ${compBar(r.res14_z,   true,  "res14_z — BTC-beta adjusted 14d return",         "res14")}
+      ${compBar(r.raw14_z,   true,  "raw14_z — raw 14d return",                        "raw14")}
+      ${compBar(r.raw7_z,    true,  "raw7_z — raw 7d return",                          "raw7")}
+      ${compBar(r.cvd_pct,   false, "cvd — within-bucket CVD pct rank",                "cvd")}
+      ${compBar(r.funding_z, true,  "funding — cross-sectional funding z",             "funding")}
     </div>`;
 
     let flagsHtml = "";
@@ -3491,7 +3491,7 @@ function renderMomentumScreener() {
       flagsHtml += `<span class="mom-flag raw-down" data-signal="raw" data-tooltip="Raw 14-day return is below the universe average in a bear regime. This name's composite score reflects relative resilience, not absolute strength — it may still be declining in USD terms. Lower conviction in bear.">RAW↓</span>`;
     }
 
-    return `<tr>
+    return `<tr class="${r.rank_pct >= 0.80 ? 'q5-row' : ''}">
       <td>${r.symbol}</td>
       <td>${rankBarHtml}</td>
       <td>${compHtml}</td>
@@ -3541,12 +3541,12 @@ function renderMomentumPreQ5() {
   /* Only non-Q5 tokens with a pre_mom_rank_pct */
   let rows = scores.filter(r => r.rank_pct < 0.80 && r.pre_mom_rank_pct != null);
   rows.sort((a, b) => b.pre_mom_rank_pct - a.pre_mom_rank_pct);
-  if (_momQ5Only) rows = rows.slice(0, 28);  /* top-quintile pre-mom (~28 names) */
 
   if (!rows.length) { wrap.innerHTML = `<div class="placeholder">no pre-Q5 candidates available</div>`; return; }
 
-  function compBar(val, isZscore, label) {
-    if (val == null) return `<div class="mom-comp-item" title="${label}"><div class="mom-comp-bar-wrap"></div></div>`;
+  function compBar(val, isZscore, label, signalKey) {
+    const attrs = signalKey ? `data-signal="${signalKey}" style="cursor:pointer"` : '';
+    if (val == null) return `<div class="mom-comp-item" title="${label}" ${attrs}><div class="mom-comp-bar-wrap"></div></div>`;
     const CLIP = 2.5;
     let pct, pos;
     if (isZscore) {
@@ -3560,7 +3560,7 @@ function renderMomentumPreQ5() {
     const bar = pos
       ? `<div style="position:absolute;left:50%;width:${pct}%;height:100%;background:${col};opacity:0.7"></div>`
       : `<div style="position:absolute;right:50%;width:${pct}%;height:100%;background:${col};opacity:0.7"></div>`;
-    return `<div class="mom-comp-item" title="${label}: ${val.toFixed ? val.toFixed(2) : val}"><div class="mom-comp-bar-wrap" style="position:relative">${bar}</div></div>`;
+    return `<div class="mom-comp-item" title="${label}: ${val.toFixed ? val.toFixed(2) : val}" ${attrs}><div class="mom-comp-bar-wrap" style="position:relative">${bar}</div></div>`;
   }
 
   const tableRows = rows.map(r => {
@@ -3583,10 +3583,10 @@ function renderMomentumPreQ5() {
     </div>`;
 
     const compHtml = `<div class="mom-comp-bars">
-      ${compBar(r.pm_rel7,  true,  "BTC-relative 7d return")}
-      ${compBar(r.pm_cvd7,  false, "CVD 7d taker buy (z-scored)")}
-      ${compBar(r.pm_accel, true,  "Composite score Δ vs 7d ago")}
-      ${compBar(r.pm_oi,    true,  "OI 14d growth")}
+      ${compBar(r.pm_rel7,  true,  "BTC-relative 7d return",          "btcrel")}
+      ${compBar(r.pm_cvd7,  false, "CVD 7d taker buy (z-scored)",     "cvd7")}
+      ${compBar(r.pm_accel, true,  "Composite score Δ vs 7d ago",     "accel")}
+      ${compBar(r.pm_oi,    true,  "OI 14d growth",                   "oi")}
     </div>`;
 
     let flagsHtml = "";
@@ -3661,11 +3661,10 @@ function renderMomentumHeatmap() {
     return 0;
   });
 
-  /* Sort by current rank_pct descending; Q5 mode caps at top 80, All mode shows all */
-  const Q5_THRESHOLD = 0.80;
+  /* Sort by current rank_pct descending; cap at max tokens */
   let ordered = tokens.map((sym, i) => ({ sym, i, rank: tokenCurrentRank[i] }))
-    .sort((a, b) => b.rank - a.rank);
-  if (_momQ5Only) ordered = ordered.filter(t => t.rank >= Q5_THRESHOLD).slice(0, MOM_HM_MAX_TOKENS);
+    .sort((a, b) => b.rank - a.rank)
+    .slice(0, MOM_HM_MAX_TOKENS);
   const order = ordered;
 
   /* Compute 7-day rolling mean per selected token */
@@ -3991,11 +3990,21 @@ function renderMomentumChart() {
 let _momSignalCache = {};
 
 const _SIGNAL_META = {
-  cvd:    { label: "CVD ts-z (14d rolling, vs 60d history)", threshold: 2.0, threshLo: null, field: "cvd_tsz",   color: "#3498db" },
-  flow:   { label: "CVD ts-z (buying pressure vs own history)", threshold: 2.0, threshLo: null, field: "cvd_tsz", color: "#2ecc71" },
-  flip:   { label: "CVD 7d net flow (selling → buying transition)", threshold: 0, threshLo: null, field: "cvd_7d_sum", color: "#3498db" },
-  shorts: { label: "Funding ts-z (vs own 60d history)", threshold: null, threshLo: -1.0, field: "fund_tsz", color: "#b5381f" },
-  raw:    { label: "14d price return", threshold: 0, threshLo: null, field: "raw_14d", color: "#545450" },
+  // existing flags
+  cvd:     { label: "CVD ts-z (14d rolling, vs 60d history)",        threshold: 2.0,  threshLo: null,  field: "cvd_tsz",          color: "#3498db" },
+  flow:    { label: "CVD ts-z (buying pressure vs own history)",      threshold: 2.0,  threshLo: null,  field: "cvd_tsz",          color: "#2ecc71" },
+  flip:    { label: "CVD 7d net flow (selling → buying transition)",  threshold: 0,    threshLo: null,  field: "cvd_7d_sum",        color: "#3498db" },
+  shorts:  { label: "Funding ts-z (vs own 60d history)",             threshold: null, threshLo: -1.0,  field: "fund_tsz",          color: "#b5381f" },
+  raw:     { label: "14d price return",                               threshold: 0,    threshLo: null,  field: "raw_14d",           color: "#545450" },
+  // component bars
+  res14:   { label: "14d return (residual vs BTC-beta)",              threshold: 0,    threshLo: null,  field: "raw_14d",           color: "#9b59b6" },
+  raw14:   { label: "Raw 14d price return",                           threshold: 0,    threshLo: null,  field: "raw_14d",           color: "#9b59b6" },
+  raw7:    { label: "Raw 7d price return",                            threshold: 0,    threshLo: null,  field: "raw_7d",            color: "#9b59b6" },
+  funding: { label: "Funding rate ts-z (vs own 60d history)",         threshold: null, threshLo: null,  field: "fund_tsz",          color: "#e67e22" },
+  btcrel:  { label: "BTC-relative 7d return",                        threshold: 0,    threshLo: null,  field: "raw_7d",            color: "#f7931a" },
+  cvd7:    { label: "CVD 7d net taker buy flow",                     threshold: 0,    threshLo: null,  field: "cvd_7d_sum",        color: "#3498db" },
+  accel:   { label: "Momentum rank_pct over time",                   threshold: 0.8,  threshLo: null,  field: "rank_pct_history",  color: "#f7931a" },
+  oi:      { label: "OI 14d growth rate",                            threshold: 0,    threshLo: null,  field: "oi_growth",         color: "#1abc9c" },
 };
 
 async function showSignalPopup(symbol, signalKey) {
@@ -4115,13 +4124,13 @@ function setupSignalPopup() {
   document.getElementById("mom-signal-close").addEventListener("click", () => overlay.classList.remove("active"));
   overlay.addEventListener("click", e => { if (e.target === overlay) overlay.classList.remove("active"); });
 
-  /* Wire flag clicks via event delegation on the whole content area */
+  /* Wire flag and component bar clicks via event delegation on the whole content area */
   document.getElementById("content-momentum").addEventListener("click", e => {
-    const flag = e.target.closest(".mom-flag[data-signal]");
-    if (!flag) return;
-    const row = flag.closest("tr");
-    const symbol = row ? row.querySelector("td") && row.querySelector("td").textContent.trim() : null;
-    if (symbol) showSignalPopup(symbol, flag.dataset.signal);
+    const target = e.target.closest(".mom-flag[data-signal], .mom-comp-item[data-signal]");
+    if (!target) return;
+    const row = target.closest("tr");
+    const symbol = row ? row.querySelector("td")?.textContent?.trim() : null;
+    if (symbol) showSignalPopup(symbol, target.dataset.signal);
   });
 }
 
@@ -4147,18 +4156,6 @@ function setupFlagTooltips() {
 }
 
 function setupMomentumToggles() {
-  /* Q5 / All toggle */
-  const q5Toggle = document.getElementById("mom-q5-toggle");
-  q5Toggle.querySelectorAll("button").forEach(btn => {
-    btn.addEventListener("click", () => {
-      _momQ5Only = btn.dataset.q5 === "true";
-      q5Toggle.querySelectorAll("button").forEach(b => b.classList.toggle("active", b === btn));
-      if (_momViewMode === "screener") renderMomentumScreener();
-      if (_momViewMode === "preq5")    renderMomentumPreQ5();
-      if (_momViewMode === "heatmap")  { _momHeatmapDrawn = false; renderMomentumHeatmap(); }
-    });
-  });
-
   /* View toggle */
   const viewToggle   = document.getElementById("mom-view-toggle");
   const screenerWrap = document.getElementById("mom-screener-wrap");
