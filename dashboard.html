@@ -1195,12 +1195,12 @@
   <!-- Methodology panels — one per view, shown/hidden with view toggle -->
   <div id="mom-method-screener" class="mom-method">
     <div class="mom-method-title">Methodology</div>
-    <span>Cross-sectional composite: equal-weight of beta-adjusted 14d return, raw 14d &amp; 7d return, and CVD taker buy flow percentile rank — scores each token relative to the 233-token universe daily.</span>
-    <span>Statistically robust alpha — Q5 names show statistically robust alpha, with an IC IR of 2.27 (OOS) and 61% Q5 hit rate at the 21-day horizon.</span>
+    <span>5-component weighted composite: z(residual_14d)×1 + z(raw_14d)×1 + z(raw_7d)×1 + z(within-bucket CVD)×2 + z(funding_xs)×0.5. CVD is ranked within large/mid/small cap tiers before z-scoring, removing size bias from absolute flow magnitudes. All components are properly z-scored and cross-sectional.</span>
+    <span>Statistically robust alpha — Q5 names outperform with an IC IR of 2.27 (OOS) and 61% Q5 hit rate at 21-day horizon. Exit signal: when rank_pct drops below 0.50 at any 7-day rebalance, exit the position (+14pp fwd21 delta for positions that don't fade vs those that do).</span>
   </div>
   <div id="mom-method-preq5" class="mom-method" style="display:none">
     <div class="mom-method-title">Methodology</div>
-    <span>5-signal composite scored daily across non-Q5 tokens: each signal is cross-sectionally z-scored then equal-weighted. Signals: (1) BTC-relative 7d return — token outperformance vs BTC; (2) CVD 7d taker buy percentile — net USD buy pressure rank; (3) composite score Δ vs 7 days ago — momentum building; (4) extreme short funding flag (funding ts-z &lt; −1.5) — squeeze setup; (5) OI 14d growth z-score — accumulation signal.</span>
+    <span>4-signal composite scored daily across non-Q5 tokens, all cross-sectionally z-scored: (1) BTC-relative 7d return — token outperformance vs BTC (×1); (2) CVD 7d taker buy pct rank, z-scored (×1.5 — highest weight, most predictive); (3) composite score Δ vs 7 days ago — momentum building (×1); (4) OI 14d growth z-score — accumulation signal (×1).</span>
     <span>Statistically robust alpha — top-quintile flags ~28 non-Q5 names per day with a 59% Q5 entry rate within 14 days, a +16pp lift over the 43% base rate, validated OOS across 2024–2026.</span>
   </div>
   <div id="mom-method-heatmap" class="mom-method" style="display:none">
@@ -3435,10 +3435,11 @@ function renderMomentumScreener() {
     </div>`;
 
     const compHtml = `<div class="mom-comp-bars">
-      ${compBar(r.res14_z,   true,  "res14_z")}
-      ${compBar(r.raw14_z,   true,  "raw14_z")}
-      ${compBar(r.raw7_z,    true,  "raw7_z")}
-      ${compBar(r.cvd_pct,   false, "cvd_pct")}
+      ${compBar(r.res14_z,   true,  "res14_z — BTC-beta adjusted 14d return")}
+      ${compBar(r.raw14_z,   true,  "raw14_z — raw 14d return")}
+      ${compBar(r.raw7_z,    true,  "raw7_z — raw 7d return")}
+      ${compBar(r.cvd_pct,   false, "cvd — within-bucket CVD pct rank (z-scored)")}
+      ${compBar(r.funding_z, true,  "funding — cross-sectional funding rate z-score")}
     </div>`;
 
     let flagsHtml = "";
@@ -3480,7 +3481,8 @@ function renderMomentumScreener() {
               <span style="flex:1;text-align:center">res14_z</span>
               <span style="flex:1;text-align:center">raw14_z</span>
               <span style="flex:1;text-align:center">raw7_z</span>
-              <span style="flex:1;text-align:center">cvd_pct</span>
+              <span style="flex:1;text-align:center">cvd</span>
+              <span style="flex:1;text-align:center">funding</span>
             </div>
           </th>
           <th>Flags</th>
@@ -3547,9 +3549,8 @@ function renderMomentumPreQ5() {
 
     const compHtml = `<div class="mom-comp-bars">
       ${compBar(r.pm_rel7,  true,  "BTC-relative 7d return")}
-      ${compBar(r.pm_cvd7,  false, "CVD 7d taker buy pct")}
+      ${compBar(r.pm_cvd7,  false, "CVD 7d taker buy (z-scored)")}
       ${compBar(r.pm_accel, true,  "Composite score Δ vs 7d ago")}
-      ${compBar(r.pm_fund,  true,  "Short positioning (positive = crowded shorts)")}
       ${compBar(r.pm_oi,    true,  "OI 14d growth")}
     </div>`;
 
@@ -3585,7 +3586,6 @@ function renderMomentumPreQ5() {
             <span style="flex:1;text-align:center">BTC-rel</span>
             <span style="flex:1;text-align:center">CVD 7d</span>
             <span style="flex:1;text-align:center">accel</span>
-            <span style="flex:1;text-align:center">short</span>
             <span style="flex:1;text-align:center">OI</span>
           </div>
         </th>
