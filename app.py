@@ -220,39 +220,40 @@ async def signal_history(symbol: str, days: int = 90, x_api_key: str | None = No
     def fmt(s: "pd.Series") -> list:
         return [round(float(v), 5) if pd.notna(v) else None for v in s]
 
-    # CVD ts-z
+    # CVD ts-z and 7d sum — apply skip=2 to match scorer.py exactly
+    skip = 2
     cvd_tsz = pd.Series(dtype=float)
     cvd_7d  = pd.Series(dtype=float)
     if not buy.empty and not sell.empty:
-        net     = (buy - sell).fillna(0)
+        net     = (buy - sell).fillna(0).shift(skip)
         c14     = net.rolling(14, min_periods=7).sum()
         cvd_tsz = (c14 - c14.rolling(60, min_periods=30).mean()) / c14.rolling(60, min_periods=30).std().replace(0, np.nan)
         cvd_7d  = net.rolling(7, min_periods=4).sum()
 
-    # Funding ts-z
+    # Funding ts-z (skip=2 matches scorer)
     fund_tsz = pd.Series(dtype=float)
     if not fund.empty:
-        fund_tsz = (fund - fund.rolling(60, min_periods=30).mean()) / fund.rolling(60, min_periods=30).std().replace(0, np.nan)
+        f = fund.shift(skip)
+        fund_tsz = (f - f.rolling(60, min_periods=30).mean()) / f.rolling(60, min_periods=30).std().replace(0, np.nan)
 
-    # Raw 14d return
+    # Raw 14d and 7d returns (skip=2 matches scorer)
     raw14 = pd.Series(dtype=float)
+    raw7  = pd.Series(dtype=float)
     if not price.empty:
-        raw14 = price / price.shift(14) - 1
+        raw14 = price.shift(skip) / price.shift(skip + 14) - 1
+        raw7  = price.shift(skip) / price.shift(skip + 7)  - 1
 
-    # Raw 7d return
-    raw7 = pd.Series(dtype=float)
-    if not price.empty:
-        raw7 = price / price.shift(7) - 1
-
-    # OI 14d growth
+    # OI 14d growth (skip=2)
     oi_growth = pd.Series(dtype=float)
     if not oi.empty:
-        oi_growth = (oi - oi.shift(14)) / oi.shift(14)
+        oi_s = oi.shift(skip)
+        oi_growth = (oi_s - oi_s.shift(14)) / oi_s.shift(14)
 
-    # L/S global ratio ts-z (what actually drives the SHORTS↑ flag)
+    # L/S global ratio ts-z — drives the SHORTS↑ flag (skip=2)
     ls_tsz = pd.Series(dtype=float)
     if not ls.empty:
-        ls_tsz = (ls - ls.rolling(60, min_periods=30).mean()) / ls.rolling(60, min_periods=30).std().replace(0, np.nan)
+        ls_s = ls.shift(skip)
+        ls_tsz = (ls_s - ls_s.rolling(60, min_periods=30).mean()) / ls_s.rolling(60, min_periods=30).std().replace(0, np.nan)
 
     # rank_pct history from mom_scores_history
     cutoff_str = cutoff.date().isoformat()
