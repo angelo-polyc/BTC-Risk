@@ -952,6 +952,30 @@
     opacity: 0.7;
   }
   .mom-token-chip button:hover { opacity: 1; }
+
+  /* Signal popup modal */
+  #mom-signal-overlay {
+    position: fixed; inset: 0; background: rgba(14,14,14,0.55);
+    z-index: 2000; display: none; align-items: center; justify-content: center;
+  }
+  #mom-signal-overlay.active { display: flex; }
+  #mom-signal-modal {
+    background: var(--bg); border: 1px solid var(--rule);
+    padding: 20px 24px 16px; width: 640px; max-width: 92vw;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.18); position: relative;
+  }
+  #mom-signal-title {
+    font-family: 'IBM Plex Sans', sans-serif; font-weight: 600;
+    font-size: 13px; margin-bottom: 12px; color: var(--ink);
+  }
+  #mom-signal-close {
+    position: absolute; top: 12px; right: 14px;
+    font-size: 16px; cursor: pointer; color: var(--ink-softer);
+    background: none; border: none; padding: 0; line-height: 1;
+  }
+  #mom-signal-close:hover { color: var(--ink); }
+  #mom-signal-canvas { display: block; width: 100%; }
+  #mom-signal-loading { font-size: 11.5px; color: var(--ink-softer); padding: 40px 0; text-align: center; }
 </style>
 </head>
 <body>
@@ -1239,6 +1263,16 @@
   </div>
 </section>
 
+<!-- Signal history popup -->
+<div id="mom-signal-overlay">
+  <div id="mom-signal-modal">
+    <button id="mom-signal-close" type="button">&#x2715;</button>
+    <div id="mom-signal-title">&#x2014;</div>
+    <div id="mom-signal-loading" style="display:none">loading&#x2026;</div>
+    <canvas id="mom-signal-canvas" height="220"></canvas>
+  </div>
+</div>
+
 </div><!-- #content-momentum -->
 
 <div id="div-tooltip"></div>
@@ -1270,6 +1304,7 @@ const FETCH_TIMEOUT_MS = 20000;
 const MOM_SCORES_URL  = "https://momentum-scanner.up.railway.app/scores?x_api_key=polychain";
 const MOM_HISTORY_URL = "https://momentum-scanner.up.railway.app/scores/history?x_api_key=polychain&days=365";
 const MOM_PRICES_URL  = "https://momentum-scanner.up.railway.app/prices?x_api_key=polychain&days=365";
+const MOM_SIGNAL_URL  = "https://momentum-scanner.up.railway.app/signal_history?x_api_key=polychain";
 
 const HYPS = [
   { col: "macro_equities",     name: "Macro & Equities",    color: "var(--h-me)" },
@@ -3444,16 +3479,16 @@ function renderMomentumScreener() {
 
     let flagsHtml = "";
     if (r.cvd_pct != null && r.cvd_pct < 0.5) {
-      flagsHtml += `<span class="mom-flag cvd-warn" data-tooltip="Net taker sell pressure over the past 7 days. This name sits below the Q5 median CVD — distribution risk. Informed sellers may be using momentum to exit. Consider reduced sizing.">CVD↓</span>`;
+      flagsHtml += `<span class="mom-flag cvd-warn" data-signal="cvd" data-tooltip="Net taker sell pressure over the past 7 days. This name sits below the Q5 median CVD — distribution risk. Informed sellers may be using momentum to exit. Consider reduced sizing.">CVD↓</span>`;
     }
     if (r.ls_ext_short === true) {
-      flagsHtml += `<span class="mom-flag ls-ext" data-tooltip="Crowded short positioning relative to own 60-day history. When shorts are extreme in a high-momentum name, a squeeze can amplify the move. Low-confidence annotation — use as context, not a signal.">SHORTS↑</span>`;
+      flagsHtml += `<span class="mom-flag ls-ext" data-signal="shorts" data-tooltip="Crowded short positioning relative to own 60-day history. When shorts are extreme in a high-momentum name, a squeeze can amplify the move. Low-confidence annotation — use as context, not a signal.">SHORTS↑</span>`;
     }
     if (r.cvd_tsz_high === true) {
-      flagsHtml += `<span class="mom-flag flow-plus" data-tooltip="Buying pressure is unusually elevated relative to this token's own 60-day history (CVD ts-z > 2.0). Continuation signal — tested: Q5 names with this flag return +12% fwd21 vs +2% baseline. Hold, do not exit.">FLOW+</span>`;
+      flagsHtml += `<span class="mom-flag flow-plus" data-signal="flow" data-tooltip="Buying pressure is unusually elevated relative to this token's own 60-day history (CVD ts-z > 2.0). Continuation signal — tested: Q5 names with this flag return +12% fwd21 vs +2% baseline. Hold, do not exit.">FLOW+</span>`;
     }
     if (rawDown) {
-      flagsHtml += `<span class="mom-flag raw-down" data-tooltip="Raw 14-day return is below the universe average in a bear regime. This name's composite score reflects relative resilience, not absolute strength — it may still be declining in USD terms. Lower conviction in bear.">RAW↓</span>`;
+      flagsHtml += `<span class="mom-flag raw-down" data-signal="raw" data-tooltip="Raw 14-day return is below the universe average in a bear regime. This name's composite score reflects relative resilience, not absolute strength — it may still be declining in USD terms. Lower conviction in bear.">RAW↓</span>`;
     }
 
     return `<tr>
@@ -3556,11 +3591,11 @@ function renderMomentumPreQ5() {
 
     let flagsHtml = "";
     if (r.ls_ext_short === true)
-      flagsHtml += `<span class="mom-flag ls-ext" data-tooltip="Crowded short positioning relative to 60-day history. Potential short squeeze amplifier.">SHORTS↑</span>`;
+      flagsHtml += `<span class="mom-flag ls-ext" data-signal="shorts" data-tooltip="Crowded short positioning relative to 60-day history. Potential short squeeze amplifier.">SHORTS↑</span>`;
     if (r.cvd_flip === true)
-      flagsHtml += `<span class="mom-flag cvd-flip" data-tooltip="Net taker flow flipped from negative to positive in the last 7 days — selling pressure has turned to buying. Pre-accumulation transition signal. Fires on ~3% of observations.">FLIP</span>`;
+      flagsHtml += `<span class="mom-flag cvd-flip" data-signal="flip" data-tooltip="Net taker flow flipped from negative to positive in the last 7 days — selling pressure has turned to buying. Pre-accumulation transition signal. Fires on ~3% of observations.">FLIP</span>`;
     if (rawDown)
-      flagsHtml += `<span class="mom-flag raw-down" data-tooltip="Raw 14-day return below universe average in bear regime. Lower conviction.">RAW↓</span>`;
+      flagsHtml += `<span class="mom-flag raw-down" data-signal="raw" data-tooltip="Raw 14-day return below universe average in bear regime. Lower conviction.">RAW↓</span>`;
 
     return `<tr>
       <td>${r.symbol}</td>
@@ -3951,6 +3986,145 @@ function renderMomentumChart() {
 
 /* ─── Toggle wiring ─── */
 
+/* ── Signal popup ──────────────────────────────────────────── */
+
+let _momSignalCache = {};
+
+const _SIGNAL_META = {
+  cvd:    { label: "CVD ts-z (14d rolling, vs 60d history)", threshold: 2.0, threshLo: null, field: "cvd_tsz",   color: "#3498db" },
+  flow:   { label: "CVD ts-z (buying pressure vs own history)", threshold: 2.0, threshLo: null, field: "cvd_tsz", color: "#2ecc71" },
+  flip:   { label: "CVD 7d net flow (selling → buying transition)", threshold: 0, threshLo: null, field: "cvd_7d_sum", color: "#3498db" },
+  shorts: { label: "Funding ts-z (vs own 60d history)", threshold: null, threshLo: -1.0, field: "fund_tsz", color: "#b5381f" },
+  raw:    { label: "14d price return", threshold: 0, threshLo: null, field: "raw_14d", color: "#545450" },
+};
+
+async function showSignalPopup(symbol, signalKey) {
+  const overlay = document.getElementById("mom-signal-overlay");
+  const title   = document.getElementById("mom-signal-title");
+  const canvas  = document.getElementById("mom-signal-canvas");
+  const loading = document.getElementById("mom-signal-loading");
+  const meta    = _SIGNAL_META[signalKey] || _SIGNAL_META.cvd;
+
+  title.textContent = symbol + " — " + meta.label;
+  canvas.style.display = "none";
+  loading.style.display = "";
+  loading.textContent = "loading…";
+  overlay.classList.add("active");
+
+  try {
+    const cacheKey = symbol + ":90";
+    if (!_momSignalCache[cacheKey]) {
+      _momSignalCache[cacheKey] = await fetchWithTimeout(MOM_SIGNAL_URL + "&symbol=" + symbol + "&days=90");
+    }
+    const data = _momSignalCache[cacheKey];
+    loading.style.display = "none";
+    canvas.style.display  = "block";
+    renderSignalChart(canvas, data, meta);
+  } catch(e) {
+    loading.textContent = "failed to load signal data";
+    console.error("[signal popup]", e);
+  }
+}
+
+function renderSignalChart(canvas, data, meta) {
+  const dates = data.dates || [];
+  const vals  = data[meta.field] || [];
+  if (!dates.length) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const W   = Math.max(300, canvas.parentElement.getBoundingClientRect().width || 580);
+  const H   = 220;
+  canvas.width  = Math.round(W * dpr);
+  canvas.height = Math.round(H * dpr);
+  canvas.style.height = H + "px";
+
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#faf8f3";
+  ctx.fillRect(0, 0, W, H);
+
+  const padL = 48, padR = 12, padT = 12, padB = 22;
+  const x0 = padL, x1 = W - padR, y0 = padT, y1 = H - padB;
+  const n  = dates.length;
+
+  const valid = vals.filter(v => v != null);
+  if (!valid.length) return;
+  const vMin = Math.min(...valid), vMax = Math.max(...valid);
+  const vPad = Math.max(0.2, (vMax - vMin) * 0.1);
+  const yLo  = vMin - vPad, yHi = vMax + vPad;
+
+  const scaleX = i  => x0 + (i / (n - 1 || 1)) * (x1 - x0);
+  const scaleY = v  => y1 - ((v - yLo) / (yHi - yLo)) * (y1 - y0);
+
+  /* Grid + y-axis */
+  const span = yHi - yLo;
+  const mag  = Math.pow(10, Math.floor(Math.log10(Math.abs(span) || 1)));
+  const steps = [0.1, 0.25, 0.5, 1, 2, 5, 10].map(s => s * mag);
+  const step  = steps.find(s => span / s >= 3 && span / s <= 8) || mag;
+  ctx.strokeStyle = "#ebe6d8"; ctx.lineWidth = 0.5;
+  for (let t = Math.ceil(yLo / step) * step; t <= yHi + 0.001; t += +step.toFixed(10)) {
+    const y = scaleY(t);
+    ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+    ctx.font = "9px 'JetBrains Mono',monospace"; ctx.fillStyle = "#545450"; ctx.textAlign = "right";
+    ctx.fillText(t.toFixed(Math.abs(t) < 10 ? 2 : 0), x0 - 4, y + 3);
+  }
+
+  /* Zero / threshold lines */
+  const drawHLine = (v, color, dash) => {
+    if (v == null || v < yLo || v > yHi) return;
+    ctx.strokeStyle = color; ctx.lineWidth = 1;
+    ctx.setLineDash(dash || []);
+    ctx.beginPath(); ctx.moveTo(x0, scaleY(v)); ctx.lineTo(x1, scaleY(v)); ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  drawHLine(0, "#8a8780", [3, 3]);
+  drawHLine(meta.threshold, "#2ecc71", [4, 4]);
+  drawHLine(meta.threshLo,  "#b5381f", [4, 4]);
+
+  /* Shade firing region */
+  const thresh = meta.threshold != null ? meta.threshold : meta.threshLo;
+  const above  = meta.threshold != null;
+  if (thresh != null) {
+    ctx.fillStyle = above ? "rgba(46,106,59,0.07)" : "rgba(181,56,31,0.07)";
+    ctx.fillRect(x0, above ? y0 : scaleY(thresh), x1 - x0, above ? scaleY(thresh) - y0 : y1 - scaleY(thresh));
+  }
+
+  /* Signal line */
+  ctx.strokeStyle = meta.color; ctx.lineWidth = 1.75; ctx.lineJoin = "round";
+  ctx.beginPath();
+  let started = false;
+  vals.forEach((v, i) => {
+    if (v == null) { started = false; return; }
+    const x = scaleX(i), y = scaleY(v);
+    if (!started) { ctx.moveTo(x, y); started = true; }
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  /* X-axis date labels */
+  ctx.font = "8.5px 'JetBrains Mono',monospace"; ctx.fillStyle = "#8a8780"; ctx.textAlign = "center";
+  const labelStep = Math.max(1, Math.floor(n / 6));
+  dates.forEach((d, i) => {
+    if (i % labelStep !== 0) return;
+    ctx.fillText(d.slice(5), scaleX(i), y1 + 14);
+  });
+}
+
+function setupSignalPopup() {
+  const overlay = document.getElementById("mom-signal-overlay");
+  document.getElementById("mom-signal-close").addEventListener("click", () => overlay.classList.remove("active"));
+  overlay.addEventListener("click", e => { if (e.target === overlay) overlay.classList.remove("active"); });
+
+  /* Wire flag clicks via event delegation on the whole content area */
+  document.getElementById("content-momentum").addEventListener("click", e => {
+    const flag = e.target.closest(".mom-flag[data-signal]");
+    if (!flag) return;
+    const row = flag.closest("tr");
+    const symbol = row ? row.querySelector("td") && row.querySelector("td").textContent.trim() : null;
+    if (symbol) showSignalPopup(symbol, flag.dataset.signal);
+  });
+}
+
 function setupFlagTooltips() {
   const tip = document.getElementById("mom-flag-tooltip");
   document.addEventListener("mouseover", e => {
@@ -4072,6 +4246,7 @@ function init() {
   setupDivViewToggle();
   setupMomentumToggles();
   setupFlagTooltips();
+  setupSignalPopup();
   document.getElementById("btn-refresh").addEventListener("click", refresh);
 
   const now = new Date();
