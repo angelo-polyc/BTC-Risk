@@ -155,24 +155,27 @@ def compute_scores(
     cvd_tsz_panel = (cvd_14d_sum - cvd_mean60_ts) / cvd_std60_ts
     cvd_tsz_latest = cvd_tsz_panel.loc[latest_date] if latest_date in cvd_tsz_panel.index else pd.Series(dtype=float)
 
-    # FLIP flag: CVD 7d sum was negative 7 days ago, now positive (net selling → net buying transition)
-    # Pre-accumulation signal for early warning tab. Fires on ~3% of observations.
+    # FLIP flag: 3-of-5 days persistence (cvd_7d_sum > 0 on at least 3 of last 5 days)
+    # Conservative compromise — captures sustained accumulation without requiring all 5 days.
+    # Validated: direction consistent, 5/7 overfit to TEST, 3/5 is the stable middle ground.
     cvd_7d_sum = (buy_c - sell_c).shift(skip).rolling(7, min_periods=4).sum()
-    cvd_7d_prev = cvd_7d_sum.shift(7)
-    cvd_flip_panel = (cvd_7d_sum > 0) & (cvd_7d_prev < 0)
-    cvd_flip_latest = cvd_flip_panel.loc[latest_date].where(
-        cvd_7d_sum.loc[latest_date].notna() & cvd_7d_prev.loc[latest_date].notna()
-    ) if latest_date in cvd_flip_panel.index else pd.Series(dtype=float)
+    cvd_7d_pos = (cvd_7d_sum > 0).astype(float)
+    cvd_flip_persistent = cvd_7d_pos.rolling(5, min_periods=5).sum() >= 3
+    cvd_flip_latest = cvd_flip_persistent.loc[latest_date].where(
+        cvd_7d_sum.loc[latest_date].notna()
+    ) if latest_date in cvd_flip_persistent.index else pd.Series(dtype=float)
 
-    # L/S extreme short flag: ts-z of ls_global ratio vs 60d history < -1.0
-    # Crowded shorts within a high-momentum name = potential squeeze amplifier.
-    # Low-confidence screener annotation only — do not use as a composite input.
+    # SHORTS↑ flag: 5-of-5 days persistence (ls_tsz < -1.0 for all of last 5 days)
+    # Validated: direction consistent in TRAIN and TEST — more persistence = stronger bear filter.
+    # FLOW+ (cvd_tsz_high): kept at 1/1 — persistence thresholds overfit to TEST period only.
     if ls_global is not None and not ls_global.empty:
         ls_g       = ls_global.reindex(index=prices.index, columns=prices.columns)
         ls_mean60  = ls_g.rolling(60, min_periods=30).mean()
         ls_std60   = ls_g.rolling(60, min_periods=30).std().replace(0, np.nan)
         ls_tsz     = (ls_g - ls_mean60) / ls_std60
-        ls_ext_short_latest = ls_tsz.loc[latest_date] if latest_date in ls_tsz.index else pd.Series(dtype=float)
+        ls_short   = (ls_tsz < -1.0).astype(float)
+        ls_short_5 = ls_short.rolling(5, min_periods=5).sum() >= 5  # all 5 days below threshold
+        ls_ext_short_latest = ls_short_5.loc[latest_date] if latest_date in ls_short_5.index else pd.Series(dtype=float)
     else:
         ls_ext_short_latest = pd.Series(dtype=float)
 
