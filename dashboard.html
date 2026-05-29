@@ -2886,6 +2886,7 @@ function divZColor(z) {
 }
 
 let _divUniverse   = null;
+let _divLoadedAt   = null;
 let _divHoverCell  = { ri: -1, ci: -1 };
 let _divHoverSetup = false;
 
@@ -3030,7 +3031,7 @@ function setupDivHover() {
 
 async function loadDivergence(force = false) {
   const meta = document.getElementById("div-meta");
-  if (_divUniverse && !force) return;
+  if (_divUniverse && !force && _divLoadedAt && (Date.now() - _divLoadedAt < 300000)) return;
   meta.textContent = "loading…";
   try {
     const r    = await fetch(DIVERGENCE_URL);
@@ -3040,6 +3041,7 @@ async function loadDivergence(force = false) {
       (a, b) => (b.market_cap_usd || 0) - (a.market_cap_usd || 0)
     );
     _divUniverse = univ;
+    _divLoadedAt = Date.now();
     renderDivCanvas(univ);
     if (!_divHoverSetup) { setupDivHover(); _divHoverSetup = true; }
     meta.textContent = univ.length + " tokens · as of " + data.as_of + " · sorted by market cap";
@@ -3245,6 +3247,7 @@ function setupTabs() {
 
 /* State */
 let _momScores      = null;
+let _momLoadedAt    = null;
 let _momHistory     = null;
 let _momPrices      = null;
 let _momViewMode    = "screener";  // "screener" | "heatmap" | "chart"
@@ -3308,7 +3311,7 @@ async function fetchWithTimeout(url) {
 async function loadMomentumScores(force = false) {
   const metaEl = document.getElementById("mom-meta");
   const wrap   = document.getElementById("mom-screener-wrap");
-  if (_momScores && !force) {
+  if (_momScores && !force && _momLoadedAt && (Date.now() - _momLoadedAt < 300000)) {
     if (_momViewMode === "screener") renderMomentumScreener();
     if (_momViewMode === "preq5")    renderMomentumPreQ5();
     return;
@@ -3317,6 +3320,7 @@ async function loadMomentumScores(force = false) {
   wrap.innerHTML = `<div class="placeholder tall">loading momentum scores…</div>`;
   try {
     _momScores = await fetchWithTimeout(MOM_SCORES_URL);
+    _momLoadedAt = Date.now();
     const { regime, gate_on, n_tokens, as_of, btc_price } = _momScores;
     const q5n = (_momScores.scores || []).filter(s => s.rank_pct >= 0.80).length;
     metaEl.textContent =
