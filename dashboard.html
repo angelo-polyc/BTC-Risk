@@ -1303,6 +1303,18 @@
  *                  `✓ /endpoint · N rows` status line.
  * ============================================================ */
 
+/* Convert UTC ISO string or Date to Eastern Time display string */
+function utcToET(input) {
+  if (!input) return "—";
+  const d = (typeof input === "string") ? new Date(input) : input;
+  if (isNaN(d)) return String(input).slice(0, 16).replace("T", " ");
+  return d.toLocaleString("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false
+  }).replace(/(\d+)\/(\d+)\/(\d+),\s*/, "$3-$1-$2 ") + " ET";
+}
+
 const API_TOKEN = "{{BTC_API_TOKEN}}";
 const API_BASE  = "";   /* same-origin; /dashboard is served by the API */
 
@@ -1529,9 +1541,9 @@ function regimeContext(today, historyRows) {
 function renderMasthead() {
   const gen = STATE.manifest && STATE.manifest.ok && STATE.manifest.data.generated_at;
   const latest = STATE.today && STATE.today.ok && STATE.today.data.date;
-  const now = new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  const now = utcToET(new Date());
   const parts = [];
-  if (gen) parts.push("snapshot " + String(gen).slice(0, 16).replace("T", " "));
+  if (gen) parts.push("snapshot " + utcToET(gen));
   if (latest) parts.push("data " + latest);
   parts.push("now " + now);
   document.getElementById("masthead-date").textContent = parts.join(" · ");
@@ -3045,7 +3057,7 @@ async function loadDivergence(force = false) {
     _divLoadedAt = Date.now();
     renderDivCanvas(univ);
     if (!_divHoverSetup) { setupDivHover(); _divHoverSetup = true; }
-    meta.textContent = univ.length + " tokens · as of " + data.as_of + " · sorted by market cap";
+    meta.textContent = univ.length + " tokens · as of " + utcToET(data.as_of) + " · sorted by market cap";
   } catch(e) {
     meta.textContent = "load failed: " + e.message;
     console.error("[divergence]", e);
@@ -3154,7 +3166,7 @@ async function loadZscoreHistory() {
     if (!r.ok) throw new Error("http " + r.status + " — history may not be seeded yet");
     _divZscoreHistory = await r.json();
     renderDivHistoryCanvas(document.getElementById("div-metric-select").value);
-    meta.textContent = "history loaded · " + (_divZscoreHistory.as_of || "—");
+    meta.textContent = "history loaded · " + utcToET(_divZscoreHistory.as_of);
   } catch(e) {
     meta.textContent = "history load failed: " + e.message;
     console.error("[zscore history]", e);
@@ -3326,7 +3338,7 @@ async function loadMomentumScores(force = false) {
     const { regime, gate_on, n_tokens, as_of, btc_price } = _momScores;
     const q5n = (_momScores.scores || []).filter(s => s.rank_pct >= 0.80).length;
     metaEl.textContent =
-      `${n_tokens} tokens · regime ${regime} · gate ${gate_on ? "ON" : "OFF"} · BTC $${btc_price != null ? btc_price.toLocaleString() : "—"} · as of ${as_of ? as_of.slice(0,16).replace("T"," ") : "—"} UTC`;
+      `${n_tokens} tokens · regime ${regime} · gate ${gate_on ? "ON" : "OFF"} · BTC $${btc_price != null ? btc_price.toLocaleString() : "—"} · as of ${utcToET(as_of)}`;
     document.getElementById("mom-section-meta").textContent =
       `${q5n} in Q5 (rank_pct ≥ 0.80) of ${n_tokens}`;
     /* Populate token selector from this universe */
@@ -4262,8 +4274,7 @@ function init() {
   document.getElementById("btn-refresh").addEventListener("click", refresh);
 
   const now = new Date();
-  const iso = now.toISOString().slice(0, 16).replace("T", " ");
-  document.getElementById("masthead-date").textContent = iso + " UTC";
+  document.getElementById("masthead-date").textContent = utcToET(now);
 
   if (API_TOKEN === "{" + "{BTC_API_TOKEN}}") {
     const hero = document.getElementById("hero");
