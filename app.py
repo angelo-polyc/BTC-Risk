@@ -42,7 +42,9 @@ async def lifespan(app: FastAPI):
         print(f"[startup] DB connection FAILED: {e}")
         _pool = None
 
+    scheduler.add_job(lambda: asyncio.create_task(_safe_ingest()), CronTrigger(hour=0,  minute=0), id="ny_midnight")
     scheduler.add_job(lambda: asyncio.create_task(_safe_ingest()), CronTrigger(hour=6,  minute=0), id="ny_morning")
+    scheduler.add_job(lambda: asyncio.create_task(_safe_ingest()), CronTrigger(hour=12, minute=0), id="ny_noon")
     scheduler.add_job(lambda: asyncio.create_task(_safe_ingest()), CronTrigger(hour=18, minute=0), id="ny_evening")
     scheduler.start()
     print("[startup] scheduler started")
