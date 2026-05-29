@@ -1367,6 +1367,7 @@ const ENDPOINTS = [
 ];
 
 let STATE = {};
+let _lastFetchAt = null;
 
 /* ── api() utility ─────────────────────────────────────────── */
 
@@ -3212,6 +3213,7 @@ function setupTabs() {
     cModel.style.display = "";
     cDiv.style.display = "none";
     cMom.style.display = "none";
+    if (!_lastFetchAt || (Date.now() - _lastFetchAt > 300000)) refresh();
   });
 
   btnDiv.addEventListener("click", () => {
@@ -4240,6 +4242,7 @@ async function refresh() {
   setRefreshInFlight(true);
   try {
     const summary = await fetchAll();
+    _lastFetchAt = Date.now();
     renderAll(summary);
   } catch (e) {
     console.error("fetchAll threw unexpectedly:", e);
