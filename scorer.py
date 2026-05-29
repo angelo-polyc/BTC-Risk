@@ -147,35 +147,35 @@ def compute_scores(
     z_r7_latest   = z_r7.loc[latest_date]
     z_buck_latest = z_buck.loc[latest_date]
 
-    # FLOW+ flag: CVD ts-z vs 60d history > 2.0
-    # Unusually elevated buying pressure relative to own history on a Q5 name.
-    # Continuation signal — tested: fires on ~15% of Q5 positions, fwd21 +12.35% vs +1.87% baseline.
+    # ── Screener annotation flags — all use uniform 2-consecutive-day persistence ──
+    # Rationale: 2 days = our rebalance-check frequency; filters single-day spikes
+    # without over-selecting. Simpler and more uniform than per-flag thresholds.
+
+    # FLOW+: cvd_tsz > 2.0 for both of last 2 days
     cvd_mean60_ts = cvd_14d_sum.rolling(60, min_periods=30).mean()
     cvd_std60_ts  = cvd_14d_sum.rolling(60, min_periods=30).std().replace(0, np.nan)
     cvd_tsz_panel = (cvd_14d_sum - cvd_mean60_ts) / cvd_std60_ts
-    cvd_tsz_latest = cvd_tsz_panel.loc[latest_date] if latest_date in cvd_tsz_panel.index else pd.Series(dtype=float)
+    cvd_tsz_2day  = (cvd_tsz_panel > 2.0).astype(float).rolling(2, min_periods=2).sum() >= 2
+    cvd_tsz_latest = cvd_tsz_2day.loc[latest_date] if latest_date in cvd_tsz_2day.index else pd.Series(dtype=float)
 
-    # FLIP flag: 3-of-5 days persistence (cvd_7d_sum > 0 on at least 3 of last 5 days)
-    # Conservative compromise — captures sustained accumulation without requiring all 5 days.
-    # Validated: direction consistent, 5/7 overfit to TEST, 3/5 is the stable middle ground.
-    cvd_7d_sum = (buy_c - sell_c).shift(skip).rolling(7, min_periods=4).sum()
-    cvd_7d_pos = (cvd_7d_sum > 0).astype(float)
-    cvd_flip_persistent = cvd_7d_pos.rolling(5, min_periods=5).sum() >= 3
-    cvd_flip_latest = cvd_flip_persistent.loc[latest_date].where(
+    # FLIP: was negative 7 days ago AND has been positive for both of last 2 days
+    # Preserves sign-change detection while filtering single-day spikes.
+    cvd_7d_sum    = (buy_c - sell_c).shift(skip).rolling(7, min_periods=4).sum()
+    pos_2days     = (cvd_7d_sum > 0).astype(float).rolling(2, min_periods=2).sum() >= 2
+    was_neg_7ago  = cvd_7d_sum.shift(7) < 0
+    cvd_flip_panel = pos_2days & was_neg_7ago
+    cvd_flip_latest = cvd_flip_panel.loc[latest_date].where(
         cvd_7d_sum.loc[latest_date].notna()
-    ) if latest_date in cvd_flip_persistent.index else pd.Series(dtype=float)
+    ) if latest_date in cvd_flip_panel.index else pd.Series(dtype=float)
 
-    # SHORTS↑ flag: 5-of-5 days persistence (ls_tsz < -1.0 for all of last 5 days)
-    # Validated: direction consistent in TRAIN and TEST — more persistence = stronger bear filter.
-    # FLOW+ (cvd_tsz_high): kept at 1/1 — persistence thresholds overfit to TEST period only.
+    # SHORTS↑: ls_tsz < -1.0 for both of last 2 days
     if ls_global is not None and not ls_global.empty:
-        ls_g       = ls_global.reindex(index=prices.index, columns=prices.columns)
-        ls_mean60  = ls_g.rolling(60, min_periods=30).mean()
-        ls_std60   = ls_g.rolling(60, min_periods=30).std().replace(0, np.nan)
-        ls_tsz     = (ls_g - ls_mean60) / ls_std60
-        ls_short   = (ls_tsz < -1.0).astype(float)
-        ls_short_5 = ls_short.rolling(5, min_periods=5).sum() >= 5  # all 5 days below threshold
-        ls_ext_short_latest = ls_short_5.loc[latest_date] if latest_date in ls_short_5.index else pd.Series(dtype=float)
+        ls_g      = ls_global.reindex(index=prices.index, columns=prices.columns)
+        ls_mean60 = ls_g.rolling(60, min_periods=30).mean()
+        ls_std60  = ls_g.rolling(60, min_periods=30).std().replace(0, np.nan)
+        ls_tsz    = (ls_g - ls_mean60) / ls_std60
+        ls_short_2day = (ls_tsz < -1.0).astype(float).rolling(2, min_periods=2).sum() >= 2
+        ls_ext_short_latest = ls_short_2day.loc[latest_date] if latest_date in ls_short_2day.index else pd.Series(dtype=float)
     else:
         ls_ext_short_latest = pd.Series(dtype=float)
 
